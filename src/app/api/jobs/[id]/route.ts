@@ -5,7 +5,7 @@ import { prisma } from '../../../../lib/prisma';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   try {
     // Check authentication
@@ -15,7 +15,7 @@ export async function GET(
     }
 
     // Get the id from params directly
-    const jobId = params.id;
+    const jobId = context.params.id;
     if (!jobId) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
@@ -61,7 +61,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   try {
     // Check authentication
@@ -71,7 +71,7 @@ export async function DELETE(
     }
 
     // Get the id from params directly
-    const jobId = params.id;
+    const jobId = context.params.id;
     if (!jobId) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
