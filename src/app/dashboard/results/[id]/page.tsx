@@ -115,9 +115,8 @@ const groupAndCleanEmails = (results: ResultItem[]): ResultItem[] => {
   return cleanedResults;
 };
 
-export default function JobResults({ params }: { params: { id: string } }) {
-  // Replace the direct Promise.resolve with a simple variable assignment
-  const jobId = params.id;
+export default function JobResults({ params }: { params: Promise<{ id: string }> }) {
+  const [jobId, setJobId] = useState<string | null>(null);
   const { data: session, status } = useSession();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
@@ -136,6 +135,21 @@ export default function JobResults({ params }: { params: { id: string } }) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [allCopied, setAllCopied] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Extract the ID from params promise
+  useEffect(() => {
+    const extractId = async () => {
+      try {
+        const resolvedParams = await params;
+        setJobId(resolvedParams.id);
+      } catch (error) {
+        console.error('Error resolving params:', error);
+        setError('Invalid job ID');
+      }
+    };
+    
+    extractId();
+  }, [params]);
 
   // Redirect to login if not authenticated
   useEffect(() => {
