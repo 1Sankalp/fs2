@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { prisma } from '@/lib/prisma';
+import { prisma, prismaClientSingleton } from '@/lib/prisma';
+
+interface RouteSegmentProps {
+  params: { id: string };
+}
 
 // Function to find common email from set of similar emails
 const findCommonEmail = (emails: string[]): string => {
@@ -110,8 +114,11 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: RouteSegmentProps
 ): Promise<Response> {
+  // Create a fresh Prisma client to avoid prepared statement issues
+  const freshPrisma = prismaClientSingleton();
+  
   try {
     // Check authentication
     const session = await getServerSession(authOptions);
@@ -120,58 +127,96 @@ export async function GET(
     }
 
     // Get the id from params
-    const { id } = await params;
+    const id = params.id;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
+    
+    // Handle hardcoded users with demo job IDs
+    const userId = session.user.id;
+    if (userId.startsWith('hardcoded-') && id.startsWith('demo-')) {
+      // Generate mock results for CSV
+      const mockResults = [
+        { website: 'example.com', email: 'contact@example.com' },
+        { website: 'demo-site.com', email: 'info@demo-site.com' },
+        { website: 'test-company.com', email: 'hello@test-company.com' },
+        { website: 'acme.org', email: 'support@acme.org' },
+        { website: 'business.net', email: 'sales@business.net' }
+      ];
+      
+      // Generate CSV
+      let csv = 'Website,Email\n';
+      mockResults.forEach((result) => {
+        csv += `"${result.website}","${result.email || ''}"\n`;
+      });
 
-    // Fetch the job
-    const job = await prisma.job.findUnique({
-      where: {
-        id,
-      },
-    });
+      const headers = new Headers();
+      headers.append('Content-Type', 'text/csv');
+      headers.append(
+        'Content-Disposition',
+        `attachment; filename="emails-${id}.csv"`
+      );
 
-    if (!job) {
-      return new Response('Job not found', { status: 404 });
+      return new Response(csv, {
+        headers,
+      });
     }
 
-    // Check if the job belongs to the current user
-    if (job.userId !== session.user.id) {
-      return new Response('Unauthorized', { status: 403 });
+    try {
+      // Fetch the job
+      const job = await freshPrisma.job.findUnique({
+        where: {
+          id,
+        },
+      });
+
+      if (!job) {
+        return new Response('Job not found', { status: 404 });
+      }
+
+      // Check if the job belongs to the current user
+      if (job.userId !== session.user.id) {
+        return new Response('Unauthorized', { status: 403 });
+      }
+
+      // Fetch the job results
+      const results = await freshPrisma.result.findMany({
+        where: {
+          jobId: id,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      });
+
+      // Clean and group emails
+      const cleanedResults = groupAndCleanEmails(results);
+
+      // Generate CSV
+      let csv = 'Website,Email\n';
+      cleanedResults.forEach((result) => {
+        csv += `"${result.website}","${result.email || ''}"\n`;
+      });
+
+      const headers = new Headers();
+      headers.append('Content-Type', 'text/csv');
+      headers.append(
+        'Content-Disposition',
+        `attachment; filename="emails-${id}.csv"`
+      );
+
+      return new Response(csv, {
+        headers,
+      });
+    } catch (error) {
+      console.error('Database operation error:', error);
+      return new Response(`Database error: ${String(error)}`, { status: 500 });
     }
-
-    // Fetch the job results
-    const results = await prisma.result.findMany({
-      where: {
-        jobId: id,
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
-
-    // Clean and group emails
-    const cleanedResults = groupAndCleanEmails(results);
-
-    // Generate CSV
-    let csv = 'Website,Email\n';
-    cleanedResults.forEach((result) => {
-      csv += `"${result.website}","${result.email || ''}"\n`;
-    });
-
-    const headers = new Headers();
-    headers.append('Content-Type', 'text/csv');
-    headers.append(
-      'Content-Disposition',
-      `attachment; filename="emails-${id}.csv"`
-    );
-
-    return new Response(csv, {
-      headers,
-    });
   } catch (error) {
     console.error('Download job results error:', error);
     return new Response('Failed to download job results', { status: 500 });
+  } finally {
+    // Clean up the Prisma client
+    await freshPrisma.$disconnect();
   }
 } 
