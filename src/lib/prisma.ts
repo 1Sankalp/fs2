@@ -7,13 +7,7 @@ const globalForPrisma = global as unknown as { prisma: PrismaClient };
 export const prismaClientSingleton = () => {
   return new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    datasources: {
-      db: {
-        url: process.env.DATABASE_URL
-      },
-    },
-    // Set PostgreSQL specific connection options as a string parameter
-    // to avoid the prepared statement already exists error
+    // Only using datasourceUrl to avoid "Cannot use datasourceUrl and datasources at the same time" error
     datasourceUrl: process.env.DATABASE_URL + "?pgbouncer=true&statement_cache_size=0&connect_timeout=10&idle_timeout=2",
   });
 };
