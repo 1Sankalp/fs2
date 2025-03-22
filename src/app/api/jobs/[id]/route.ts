@@ -24,45 +24,70 @@ export async function GET(
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
     
-    // Handle hardcoded users with demo job IDs
+    // Get the user ID
     const userId = session.user.id;
-    if (userId.startsWith('hardcoded-') && id.startsWith('demo-')) {
-      // Generate mock data for hardcoded users
-      const username = userId.replace('hardcoded-', '');
-      const mockJob = {
-        id: id,
-        name: `Demo for ${username}`,
-        sheetUrl: 'https://docs.google.com/spreadsheets/d/example',
-        columnName: 'Website',
-        status: 'completed',
-        totalUrls: 5,
-        processedUrls: 5,
-        progress: 100,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        userId: userId
-      };
+    
+    // For hardcoded users with demo job IDs, try the database first
+    if (userId.startsWith('hardcoded-')) {
+      try {
+        // First try to find a real job
+        const job = await freshPrisma.job.findUnique({
+          where: { id },
+        });
+
+        // If we found a real job that belongs to this user, return that with its results
+        if (job && job.userId === userId) {
+          const results = await freshPrisma.result.findMany({
+            where: { jobId: id },
+            orderBy: { createdAt: 'asc' },
+          });
+
+          return NextResponse.json({
+            job,
+            results,
+          });
+        }
+      } catch (err) {
+        console.error('Error finding real job for hardcoded user:', err);
+      }
       
-      const mockResults = [
-        { id: `result-1-${id}`, website: 'example.com', email: 'contact@example.com', createdAt: new Date(), jobId: id },
-        { id: `result-2-${id}`, website: 'demo-site.com', email: 'info@demo-site.com', createdAt: new Date(), jobId: id },
-        { id: `result-3-${id}`, website: 'test-company.com', email: 'hello@test-company.com', createdAt: new Date(), jobId: id },
-        { id: `result-4-${id}`, website: 'acme.org', email: 'support@acme.org', createdAt: new Date(), jobId: id },
-        { id: `result-5-${id}`, website: 'business.net', email: 'sales@business.net', createdAt: new Date(), jobId: id }
-      ];
-      
-      return NextResponse.json({
-        job: mockJob,
-        results: mockResults
-      });
+      // If no real job found and it's a demo-id, return mock data as fallback
+      if (id.startsWith('demo-')) {
+        // Generate mock data for hardcoded users
+        const username = userId.replace('hardcoded-', '');
+        const mockJob = {
+          id: id,
+          name: `Demo for ${username}`,
+          sheetUrl: 'https://docs.google.com/spreadsheets/d/example',
+          columnName: 'Website',
+          status: 'completed',
+          totalUrls: 5,
+          processedUrls: 5,
+          progress: 100,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          userId: userId
+        };
+        
+        const mockResults = [
+          { id: `result-1-${id}`, website: 'example.com', email: 'contact@example.com', createdAt: new Date(), jobId: id },
+          { id: `result-2-${id}`, website: 'demo-site.com', email: 'info@demo-site.com', createdAt: new Date(), jobId: id },
+          { id: `result-3-${id}`, website: 'test-company.com', email: 'hello@test-company.com', createdAt: new Date(), jobId: id },
+          { id: `result-4-${id}`, website: 'acme.org', email: 'support@acme.org', createdAt: new Date(), jobId: id },
+          { id: `result-5-${id}`, website: 'business.net', email: 'sales@business.net', createdAt: new Date(), jobId: id }
+        ];
+        
+        return NextResponse.json({
+          job: mockJob,
+          results: mockResults
+        });
+      }
     }
 
     try {
-      // Fetch the job
+      // Standard case: fetch the job from database
       const job = await freshPrisma.job.findUnique({
-        where: {
-          id: id,
-        },
+        where: { id },
       });
 
       if (!job) {
@@ -70,18 +95,14 @@ export async function GET(
       }
 
       // Check if the job belongs to the current user
-      if (job.userId !== session.user.id) {
+      if (job.userId !== userId) {
         return NextResponse.json({ message: 'Unauthorized' }, { status: 403 });
       }
 
       // Fetch the job results
       const results = await freshPrisma.result.findMany({
-        where: {
-          jobId: id,
-        },
-        orderBy: {
-          createdAt: 'asc',
-        },
+        where: { jobId: id },
+        orderBy: { createdAt: 'asc' },
       });
 
       return NextResponse.json({

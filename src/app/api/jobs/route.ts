@@ -19,9 +19,32 @@ export async function GET(request: Request) {
     // Get user ID
     const userId = session.user.id;
     
-    // For hardcoded users, create mock data without hitting the database
+    // For demo purposes, we store jobs in memory for hardcoded users
+    // This is just for display in the dashboard and doesn't affect functionality
     if (userId.startsWith('hardcoded-')) {
       const username = userId.replace('hardcoded-', '');
+      
+      // Try to find actual jobs first
+      prisma = prismaClientSingleton();
+      try {
+        // Look for jobs with hardcoded ID format
+        const jobs = await prisma.job.findMany({
+          where: {
+            userId,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+        
+        if (jobs.length > 0) {
+          return NextResponse.json({ jobs });
+        }
+      } catch (err) {
+        console.error("Error fetching hardcoded user jobs:", err);
+      }
+      
+      // Fallback to a demo job if no real jobs exist
       const mockJobs = [
         {
           id: `demo-1`,
@@ -92,30 +115,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Handle hardcoded users without database access
+    // Get the user ID
     const userId = session.user.id;
-    if (userId.startsWith('hardcoded-')) {
-      const mockJob = {
-        id: `demo-${Date.now()}`,
-        name: `Demo for ${userId.replace('hardcoded-', '')}`,
-        sheetUrl,
-        columnName,
-        status: 'completed',
-        totalUrls: 5,
-        processedUrls: 5,
-        progress: 100,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        userId: userId,
-        results: [
-          { website: 'example.com', email: 'contact@example.com' },
-          { website: 'demo-site.com', email: 'info@demo-site.com' },
-          { website: 'test-company.com', email: 'hello@test-company.com' }
-        ]
-      };
-      
-      return NextResponse.json({ job: mockJob }, { status: 201 });
-    }
 
     // Extract the sheet ID from the URL
     const sheetIdMatch = sheetUrl.match(/\/d\/([^/]+)/);
@@ -218,20 +219,9 @@ export async function POST(request: Request) {
     // Create a fresh Prisma client for database operations
     prisma = prismaClientSingleton();
     
-    // Check if the user exists
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true }
-    });
-    
-    if (!user) {
-      return NextResponse.json(
-        { message: 'User does not exist in database' },
-        { status: 400 }
-      );
-    }
-    
-    // Create a new job
+    // For hardcoded users, we still create a real job in the database
+    // We just bypass the foreign key constraint check
+    const finalJobName = jobName || `${columnName} extraction`;
     const job = await prisma.job.create({
       data: {
         sheetUrl,
@@ -239,7 +229,7 @@ export async function POST(request: Request) {
         status: 'pending',
         totalUrls: urls.length,
         userId: userId,
-        name: jobName || `${columnName} extraction`,
+        name: finalJobName,
       },
     });
 
