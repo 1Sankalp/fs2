@@ -1,4 +1,4 @@
-import { NextResponse, NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
@@ -109,9 +109,9 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 };
 
 export async function GET(
-  request: NextRequest,
-  context: { params: { id: string } }
-) {
+  request: Request,
+  { params }: { params: { id: string } }
+): Promise<Response> {
   try {
     // Check authentication
     const session = await getServerSession(authOptions);
@@ -120,7 +120,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
