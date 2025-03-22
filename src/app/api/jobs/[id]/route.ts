@@ -1,11 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { prisma, prismaClientSingleton } from '../../../../lib/prisma';
 
+interface RequestContext {
+  params: {
+    id: string;
+  };
+}
+
 export async function GET(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: RequestContext
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -18,7 +24,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
@@ -107,8 +113,8 @@ export async function GET(
 }
 
 export async function DELETE(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: RequestContext
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -121,7 +127,7 @@ export async function DELETE(
     }
 
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }

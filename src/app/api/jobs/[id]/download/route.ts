@@ -108,9 +108,15 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
+interface RequestContext {
+  params: {
+    id: string;
+  };
+}
+
 export async function GET(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: RequestContext
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -123,7 +129,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
