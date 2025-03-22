@@ -110,7 +110,7 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   try {
     // Check authentication
@@ -120,7 +120,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = params.id;
+    const { id } = await params;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }

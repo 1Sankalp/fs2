@@ -5,7 +5,7 @@ import { prisma } from '../../../../lib/prisma';
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   try {
     // Check authentication
@@ -14,16 +14,16 @@ export async function GET(
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get the id from params directly
-    const jobId = params.id;
-    if (!jobId) {
+    // Get the id from params
+    const { id } = await params;
+    if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
 
     // Fetch the job
     const job = await prisma.job.findUnique({
       where: {
-        id: jobId,
+        id: id,
       },
     });
 
@@ -39,7 +39,7 @@ export async function GET(
     // Fetch the job results
     const results = await prisma.result.findMany({
       where: {
-        jobId: jobId,
+        jobId: id,
       },
       orderBy: {
         createdAt: 'asc',
@@ -61,7 +61,7 @@ export async function GET(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ): Promise<Response> {
   try {
     // Check authentication
@@ -70,16 +70,16 @@ export async function DELETE(
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get the id from params directly
-    const jobId = params.id;
-    if (!jobId) {
+    // Get the id from params
+    const { id } = await params;
+    if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
 
     // Fetch the job to ensure it exists and belongs to the user
     const job = await prisma.job.findUnique({
       where: {
-        id: jobId,
+        id: id,
       },
     });
 
@@ -95,14 +95,14 @@ export async function DELETE(
     // First delete all results for this job
     await prisma.result.deleteMany({
       where: {
-        jobId: jobId,
+        jobId: id,
       },
     });
 
     // Then delete the job
     await prisma.job.delete({
       where: {
-        id: jobId,
+        id: id,
       },
     });
 
