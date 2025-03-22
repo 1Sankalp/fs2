@@ -3,13 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { prisma, prismaClientSingleton } from '../../../../lib/prisma';
 
-interface RouteSegmentProps {
-  params: { id: string };
-}
-
 export async function GET(
   request: Request,
-  { params }: RouteSegmentProps
+  context: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -22,7 +18,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = params.id;
+    const id = context.params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
@@ -112,7 +108,7 @@ export async function GET(
 
 export async function DELETE(
   request: Request,
-  { params }: RouteSegmentProps
+  context: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -125,7 +121,7 @@ export async function DELETE(
     }
 
     // Get the id from params
-    const id = params.id;
+    const id = context.params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }

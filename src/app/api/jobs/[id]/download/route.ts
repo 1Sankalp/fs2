@@ -3,10 +3,6 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma, prismaClientSingleton } from '@/lib/prisma';
 
-interface RouteSegmentProps {
-  params: { id: string };
-}
-
 // Function to find common email from set of similar emails
 const findCommonEmail = (emails: string[]): string => {
   if (!emails || emails.length === 0) return '';
@@ -114,7 +110,7 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: Request,
-  { params }: RouteSegmentProps
+  context: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -127,7 +123,7 @@ export async function GET(
     }
 
     // Get the id from params
-    const id = params.id;
+    const id = context.params.id;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
