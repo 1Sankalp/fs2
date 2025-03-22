@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
-import { prisma, prismaClientSingleton } from '../../../../lib/prisma';
+import { prismaClientSingleton } from '../../../../lib/prisma';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
-): Promise<Response> {
+  context: any
+) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
+    // Get the id from params
+    const id = context.params.id;
+    
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get the id from params
-    const id = params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
@@ -108,20 +109,21 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
-): Promise<Response> {
+  context: any
+) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
+    // Get the id from params
+    const id = context.params.id;
+    
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Get the id from params
-    const id = params.id;
     if (!id) {
       return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
     }
