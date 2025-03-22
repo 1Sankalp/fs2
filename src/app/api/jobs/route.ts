@@ -7,47 +7,45 @@ import { startEmailScraping } from '../../../lib/scraper';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: Request) {
-  // Create a fresh Prisma client immediately to avoid prepared statement issues
-  const freshPrisma = prismaClientSingleton();
+  let prisma = null;
   
   try {
-    // Check authentication
+    // Check authentication first, before creating any DB connections
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Handle both normal and hardcoded user IDs
+    // Get user ID
     const userId = session.user.id;
     
-    // For hardcoded users, check if jobs exist or create a demo job
+    // For hardcoded users, create mock data without hitting the database
     if (userId.startsWith('hardcoded-')) {
-      // Get username from the hardcoded ID
       const username = userId.replace('hardcoded-', '');
+      const mockJobs = [
+        {
+          id: `demo-1`,
+          name: `Demo for ${username}`,
+          sheetUrl: 'https://docs.google.com/spreadsheets/d/mock',
+          columnName: 'Website',
+          status: 'completed',
+          totalUrls: 5,
+          processedUrls: 5,
+          progress: 100,
+          createdAt: new Date(Date.now() - 86400000), // 1 day ago
+          updatedAt: new Date(Date.now() - 3600000),  // 1 hour ago
+          userId: userId
+        }
+      ];
       
-      // Check if this hardcoded user has any jobs
-      const existingJobs = await freshPrisma.job.findMany({
-        where: {
-          name: {
-            contains: `Demo for ${username}`
-          }
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
-      });
-      
-      if (existingJobs.length > 0) {
-        return NextResponse.json({ jobs: existingJobs });
-      }
-      
-      // If no jobs exist, return an empty array
-      // We'll create a demo job in the POST handler if needed
-      return NextResponse.json({ jobs: [] });
+      return NextResponse.json({ jobs: mockJobs });
     }
     
-    // For regular users, fetch from database
-    const jobs = await freshPrisma.job.findMany({
+    // For real users, create a fresh client for database access
+    prisma = prismaClientSingleton();
+    
+    // Fetch jobs from database
+    const jobs = await prisma.job.findMany({
       where: {
         userId: userId,
       },
@@ -65,17 +63,18 @@ export async function GET(request: Request) {
     );
   } finally {
     // Clean up the Prisma client
-    await freshPrisma.$disconnect();
+    if (prisma) {
+      await prisma.$disconnect();
+    }
   }
 }
 
 // POST /api/jobs - Create a new job
 export async function POST(request: Request) {
-  // Create a fresh Prisma client immediately to avoid prepared statement issues
-  const freshPrisma = prismaClientSingleton();
+  let prisma = null;
   
   try {
-    // Check authentication
+    // Check authentication first, before creating any DB connections
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
@@ -93,11 +92,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Handle hardcoded users differently
+    // Handle hardcoded users without database access
     const userId = session.user.id;
     if (userId.startsWith('hardcoded-')) {
-      // For hardcoded users, create a special job without foreign key constraint
-      // Instead of attempting database inserts, return a mock job
       const mockJob = {
         id: `demo-${Date.now()}`,
         name: `Demo for ${userId.replace('hardcoded-', '')}`,
@@ -218,8 +215,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if the user actually exists in the database before creating a job
-    const user = await freshPrisma.user.findUnique({
+    // Create a fresh Prisma client for database operations
+    prisma = prismaClientSingleton();
+    
+    // Check if the user exists
+    const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true }
     });
@@ -231,8 +231,8 @@ export async function POST(request: Request) {
       );
     }
     
-    // Create a new job in the database
-    const job = await freshPrisma.job.create({
+    // Create a new job
+    const job = await prisma.job.create({
       data: {
         sheetUrl,
         columnName,
@@ -243,8 +243,15 @@ export async function POST(request: Request) {
       },
     });
 
-    // Start the scraping process in the background
-    startEmailScraping(job.id, urls);
+    // Start the scraping process in the background with a copy of the job ID and URLs
+    // This ensures the current request can finish and close its DB connection
+    const jobId = job.id;
+    const urlsCopy = [...urls];
+    
+    // Use setTimeout to run this after the current request is complete
+    setTimeout(() => {
+      startEmailScraping(jobId, urlsCopy);
+    }, 100);
 
     return NextResponse.json({ job }, { status: 201 });
   } catch (error) {
@@ -255,6 +262,8 @@ export async function POST(request: Request) {
     );
   } finally {
     // Clean up the Prisma client
-    await freshPrisma.$disconnect();
+    if (prisma) {
+      await prisma.$disconnect();
+    }
   }
 } 

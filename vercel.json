@@ -4,13 +4,10 @@
   "outputDirectory": ".next",
   "framework": "nextjs",
   "env": {
-    "PRISMA_CLIENT_ENGINE_TYPE": "dataproxy",
-    "POSTGRES_PRISMA_EXTENSION_SCHEMA": "public",
-    "POSTGRES_STATEMENT_TIMEOUT": "60000",
     "NODE_ENV": "production",
-    "ENVIRONMENT": "production",
-    "PRISMA_GENERATE_DATAPROXY": "true",
-    "POSTGRES_URL_NON_POOLING": "${env.DATABASE_URL}?pgbouncer=true&statement_cache_size=0&connect_timeout=15&pool_timeout=15&idle_timeout=5",
-    "PRISMA_GENERATE_ENGINE_TYPE": "dataproxy"
+    "POSTGRES_STATEMENT_TIMEOUT": "60000",
+    "PRISMA_CLIENT_ENGINE_TYPE": "binary",
+    "DATABASE_CONNECTION_TYPE": "direct",
+    "POSTGRES_USE_PREPARED_STATEMENTS": "false"
   }
 } 

@@ -1,27 +1,31 @@
 import { PrismaClient } from '@prisma/client';
 
-// PrismaClient is attached to the `global` object in development to prevent
-// exhausting your database connection limit.
-const globalForPrisma = global as unknown as { prisma: PrismaClient };
-
+// Create a new client with completely disabled connection pooling
 export const prismaClientSingleton = () => {
+  // Force use of direct URL without pooling and no statement caching
+  let url = process.env.DATABASE_URL;
+  
+  // Ensure we're using a direct URL, not a pooled one
+  if (url?.includes('pgbouncer=true')) {
+    url = url.replace('pgbouncer=true', 'pgbouncer=false');
+  }
+  
+  // Add non-pooling parameters
+  url = url + 
+    "?connection_limit=1" + 
+    "&pool_timeout=0" +
+    "&statement_cache_size=0" +
+    "&connect_timeout=30";
+    
   return new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-    datasourceUrl: process.env.DATABASE_URL + 
-      "?pgbouncer=true" + 
-      "&statement_cache_size=0" +  // Disable statement caching
-      "&connect_timeout=15" +      // Longer connect timeout
-      "&pool_timeout=15" +         // Pool timeout
-      "&idle_timeout=5" +          // Shorter idle timeout
-      "&application_name=email_scraper",  // Application name for tracking
+    log: ['error', 'warn'],
+    datasourceUrl: url,
   });
 };
 
-// In production, we don't use the global client at all to avoid prepared statement issues
-// In development, we use a global client for faster refresh cycles
-export const prisma = process.env.NODE_ENV === 'production' 
-  ? prismaClientSingleton() 
-  : (globalForPrisma.prisma || prismaClientSingleton());
+// Always use a fresh client, never a shared one
+export const prisma = prismaClientSingleton();
 
-// If not in production, add the prisma client to the global object
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma; 
+// Avoid modifying global object entirely
+const globalForPrisma = global as unknown as { prisma: undefined };
+globalForPrisma.prisma = undefined; 

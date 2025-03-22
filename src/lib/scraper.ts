@@ -54,24 +54,33 @@ function extractJsonEmails(obj: any): string[] {
  * Start the email scraping process for a job
  */
 export async function startEmailScraping(jobId: string, urls: string[]) {
-  // Create a fresh Prisma client to avoid prepared statement issues
-  const freshPrisma = prismaClientSingleton();
+  console.log(`Starting email scraping for job ${jobId} with ${urls.length} URLs`);
+  
+  // Create a fresh client for initial job update
+  let prisma = prismaClientSingleton();
   
   try {
     // Update job status to processing
-    await freshPrisma.job.update({
+    await prisma.job.update({
       where: { id: jobId },
       data: { status: 'processing' },
     });
+  } catch (error) {
+    console.error(`Failed to update job status for ${jobId}:`, error);
+  } finally {
+    // Always disconnect after each database operation
+    await prisma.$disconnect();
+  }
 
-    // Process each URL
-    let processedCount = 0;
-    
+  let processedCount = 0;
+  
+  try {
     // Process in batches to manage memory and avoid overwhelming the server
-    const batchSize = 5; // process 5 websites at a time
+    const batchSize = 3; // process 3 websites at a time (reduced from 5)
     
     for (let i = 0; i < urls.length; i += batchSize) {
       const batch = urls.slice(i, i + batchSize);
+      
       await Promise.all(batch.map(async (url) => {
         try {
           // Fix URLs without protocol
@@ -82,78 +91,117 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
           // Extract emails from the website
           const emails = await extractEmails(url);
           
-          // Save result to database
-          await freshPrisma.result.create({
-            data: {
-              jobId,
-              website: url,
-              email: emails.length > 0 ? emails[0] : null,
-            },
-          });
+          // Create a new client for each batch of database operations
+          const batchPrisma = prismaClientSingleton();
+          
+          try {
+            // Save primary result to database
+            await batchPrisma.result.create({
+              data: {
+                jobId,
+                website: url,
+                email: emails.length > 0 ? emails[0] : null,
+              },
+            });
 
-          // For multiple emails, save additional results
-          if (emails.length > 1) {
-            for (let j = 1; j < emails.length; j++) {
-              await freshPrisma.result.create({
-                data: {
-                  jobId,
-                  website: url,
-                  email: emails[j],
-                },
-              });
+            // For multiple emails, save additional results
+            if (emails.length > 1) {
+              for (let j = 1; j < Math.min(emails.length, 3); j++) { // Limit to 3 emails max
+                await batchPrisma.result.create({
+                  data: {
+                    jobId,
+                    website: url,
+                    email: emails[j],
+                  },
+                });
+              }
             }
+          } catch (error) {
+            console.error(`Error saving results for URL ${url}:`, error);
+          } finally {
+            // Close the batch client
+            await batchPrisma.$disconnect();
           }
         } catch (error) {
           console.error(`Error processing URL ${url}:`, error);
-          // Save failed result
-          await freshPrisma.result.create({
-            data: {
-              jobId,
-              website: url,
-              email: null,
-            },
-          });
-        } finally {
-          // Update progress
-          processedCount++;
-          const progress = Math.round((processedCount / urls.length) * 100);
           
-          await freshPrisma.job.update({
-            where: { id: jobId },
-            data: { 
-              processedUrls: processedCount,
-              progress,
-            },
-          });
+          // Create a client just for this error result
+          const errorPrisma = prismaClientSingleton();
+          try {
+            // Save failed result
+            await errorPrisma.result.create({
+              data: {
+                jobId,
+                website: url,
+                email: null,
+              },
+            });
+          } catch (innerError) {
+            console.error(`Error saving failure for ${url}:`, innerError);
+          } finally {
+            await errorPrisma.$disconnect();
+          }
         }
+        
+        // Increment counter for tracking progress
+        processedCount++;
       }));
       
-      // Add small delay between batches to avoid overwhelming the system
+      // Update progress with a new client after each batch
+      const progressPrisma = prismaClientSingleton();
+      try {
+        const progress = Math.round((processedCount / urls.length) * 100);
+        
+        await progressPrisma.job.update({
+          where: { id: jobId },
+          data: { 
+            processedUrls: processedCount,
+            progress,
+          },
+        });
+      } catch (error) {
+        console.error(`Error updating progress for job ${jobId}:`, error);
+      } finally {
+        await progressPrisma.$disconnect();
+      }
+      
+      // Add small delay between batches
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    // Update job status to completed
-    await freshPrisma.job.update({
-      where: { id: jobId },
-      data: { 
-        status: 'completed',
-        progress: 100,
-      },
-    });
+    // Final update with completed status using a new client
+    const finalPrisma = prismaClientSingleton();
+    try {
+      await finalPrisma.job.update({
+        where: { id: jobId },
+        data: { 
+          status: 'completed',
+          progress: 100,
+        },
+      });
+    } catch (error) {
+      console.error(`Error setting job ${jobId} as completed:`, error);
+    } finally {
+      await finalPrisma.$disconnect();
+    }
   } catch (error) {
     console.error(`Error processing job ${jobId}:`, error);
     
-    // Update job status to failed
-    await freshPrisma.job.update({
-      where: { id: jobId },
-      data: { 
-        status: 'failed',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-    });
-  } finally {
-    // Clean up the Prisma client
-    await freshPrisma.$disconnect();
+    // Update job status to failed using a new client
+    const errorPrisma = prismaClientSingleton();
+    try {
+      await errorPrisma.job.update({
+        where: { id: jobId },
+        data: { 
+          status: 'failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+      });
+    } catch (innerError) {
+      console.error(`Error setting job ${jobId} as failed:`, innerError);
+    } finally {
+      await errorPrisma.$disconnect();
+    }
   }
 }
 
