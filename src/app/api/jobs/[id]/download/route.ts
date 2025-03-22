@@ -108,15 +108,10 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
-interface RequestContext {
-  params: {
-    id: string;
-  };
-}
-
+// Define the GET handler for downloading job results
 export async function GET(
   request: NextRequest,
-  { params }: RequestContext
+  { params }: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();

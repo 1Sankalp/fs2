@@ -3,15 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { prisma, prismaClientSingleton } from '../../../../lib/prisma';
 
-interface RequestContext {
-  params: {
-    id: string;
-  };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RequestContext
+  { params }: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -114,7 +108,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: RequestContext
+  { params }: { params: { id: string } }
 ): Promise<Response> {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
