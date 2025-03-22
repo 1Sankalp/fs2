@@ -5,7 +5,7 @@ import { prismaClientSingleton } from '../../../lib/prisma';
 import axios from 'axios';
 import { startEmailScraping } from '../../../lib/scraper';
 import { v4 as uuidv4 } from 'uuid';
-import { hardcodedJobs } from './[id]/route';
+import { hardcodedJobs } from '../../../lib/hardcodedJobs';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: Request) {

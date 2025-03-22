@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
-
-// Create an in-memory job storage for hardcoded users
-// This needs to be exported so other routes can access it
-export const hardcodedJobs = new Map<string, any>();
+import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
 export async function GET(
   request: NextRequest,

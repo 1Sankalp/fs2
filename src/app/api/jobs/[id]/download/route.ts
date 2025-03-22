@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
-import { hardcodedJobs } from '../route';
+import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
 // Function to find common email from set of similar emails
 const findCommonEmail = (emails: string[]): string => {
