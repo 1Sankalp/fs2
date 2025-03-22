@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
@@ -9,7 +9,8 @@ import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock } from 
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
-export default function Dashboard() {
+// Create a separate component for the parts that use useSearchParams
+function DashboardContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -17,13 +18,6 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'new' | 'jobs'>(
     tabParam === 'jobs' ? 'jobs' : 'new'
   );
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/auth/signin');
-    }
-  }, [status, router]);
 
   // Update URL when tab changes
   useEffect(() => {
@@ -34,19 +28,8 @@ export default function Dashboard() {
     window.history.replaceState(null, '', newUrl);
   }, [activeTab]);
 
-  if (status === 'loading') {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600 mx-auto"></div>
-          <p className="mt-4 text-slate-600 font-medium">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!session) {
-    return null; // Will redirect to login page due to the useEffect above
+    return null; // Will redirect to login page due to the useEffect in parent
   }
 
   return (
@@ -163,5 +146,39 @@ export default function Dashboard() {
         </div>
       </footer>
     </div>
+  );
+}
+
+// Loading fallback component
+function DashboardLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-600 mx-auto"></div>
+        <p className="mt-4 text-slate-600 font-medium">Loading dashboard...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (status === 'unauthenticated') {
+      router.push('/auth/signin');
+    }
+  }, [status, router]);
+
+  if (status === 'loading') {
+    return <DashboardLoading />;
+  }
+
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardContent />
+    </Suspense>
   );
 } 
