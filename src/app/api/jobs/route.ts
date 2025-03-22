@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
-import { prisma, prismaClientSingleton } from '../../../lib/prisma';
+import { prismaClientSingleton } from '../../../lib/prisma';
 import axios from 'axios';
 import { startEmailScraping } from '../../../lib/scraper';
 

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { prisma } from './prisma';
+import { prismaClientSingleton } from './prisma';
 import { parse } from 'tldts';
 
 // Constants
@@ -54,13 +54,16 @@ function extractJsonEmails(obj: any): string[] {
  * Start the email scraping process for a job
  */
 export async function startEmailScraping(jobId: string, urls: string[]) {
-  // Update job status to processing
-  await prisma.job.update({
-    where: { id: jobId },
-    data: { status: 'processing' },
-  });
-
+  // Create a fresh Prisma client to avoid prepared statement issues
+  const freshPrisma = prismaClientSingleton();
+  
   try {
+    // Update job status to processing
+    await freshPrisma.job.update({
+      where: { id: jobId },
+      data: { status: 'processing' },
+    });
+
     // Process each URL
     let processedCount = 0;
     
@@ -80,7 +83,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
           const emails = await extractEmails(url);
           
           // Save result to database
-          await prisma.result.create({
+          await freshPrisma.result.create({
             data: {
               jobId,
               website: url,
@@ -91,7 +94,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
           // For multiple emails, save additional results
           if (emails.length > 1) {
             for (let j = 1; j < emails.length; j++) {
-              await prisma.result.create({
+              await freshPrisma.result.create({
                 data: {
                   jobId,
                   website: url,
@@ -103,7 +106,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
         } catch (error) {
           console.error(`Error processing URL ${url}:`, error);
           // Save failed result
-          await prisma.result.create({
+          await freshPrisma.result.create({
             data: {
               jobId,
               website: url,
@@ -115,7 +118,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
           processedCount++;
           const progress = Math.round((processedCount / urls.length) * 100);
           
-          await prisma.job.update({
+          await freshPrisma.job.update({
             where: { id: jobId },
             data: { 
               processedUrls: processedCount,
@@ -130,7 +133,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
     }
 
     // Update job status to completed
-    await prisma.job.update({
+    await freshPrisma.job.update({
       where: { id: jobId },
       data: { 
         status: 'completed',
@@ -141,13 +144,16 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
     console.error(`Error processing job ${jobId}:`, error);
     
     // Update job status to failed
-    await prisma.job.update({
+    await freshPrisma.job.update({
       where: { id: jobId },
       data: { 
         status: 'failed',
         error: error instanceof Error ? error.message : 'Unknown error',
       },
     });
+  } finally {
+    // Clean up the Prisma client
+    await freshPrisma.$disconnect();
   }
 }
 
