@@ -1,0 +1,49 @@
+{
+  "name": "email-scraper",
+  "version": "1.0.0",
+  "description": "Website email scraper with persistent state and authentication",
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate"
+  },
+  "keywords": [
+    "email",
+    "scraper",
+    "nextjs",
+    "vercel"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@auth/prisma-adapter": "latest",
+    "@prisma/client": "^6.5.0",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "axios": "latest",
+    "bcrypt": "^5.1.1",
+    "cheerio": "latest",
+    "date-fns": "^4.1.0",
+    "framer-motion": "^12.5.0",
+    "next": "latest",
+    "next-auth": "latest",
+    "pg": "^8.14.1",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-icons": "latest",
+    "swr": "latest",
+    "tldts": "^6.1.85",
+    "typescript": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.15",
+    "@types/bcrypt": "latest",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "prisma": "^6.5.0",
+    "tailwindcss": "^4.0.15"
+  }
+}
