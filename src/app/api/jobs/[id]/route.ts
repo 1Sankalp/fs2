@@ -3,15 +3,9 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { prisma } from '../../../../lib/prisma';
 
-interface RouteSegmentProps {
-  params: {
-    id: string;
-  };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RouteSegmentProps
+  { params }: { params: { id: string } }
 ) {
   try {
     // Check authentication
@@ -67,7 +61,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: RouteSegmentProps
+  { params }: { params: { id: string } }
 ) {
   try {
     // Check authentication
