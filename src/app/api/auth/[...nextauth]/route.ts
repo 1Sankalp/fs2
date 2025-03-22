@@ -12,7 +12,7 @@ const initializeUsers = async () => {
     await Promise.race([
       ensureUsersExist(),
       new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("User initialization timed out")), 5000)
+        setTimeout(() => reject(new Error("User initialization timed out")), 10000)
       )
     ]);
     console.log("User initialization completed successfully");
@@ -23,9 +23,13 @@ const initializeUsers = async () => {
 };
 
 // Start initialization but don't wait for it
-if (!initPromise) {
+// Skip initialization in production to prevent prepared statement conflicts
+if (!initPromise && process.env.NODE_ENV !== 'production') {
   initPromise = initializeUsers();
 }
 
+// Create the NextAuth handler
 const handler = NextAuth(authOptions);
+
+// Export the handler for GET and POST methods
 export { handler as GET, handler as POST }; 
