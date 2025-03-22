@@ -7,6 +7,9 @@ import { startEmailScraping } from '../../../lib/scraper';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: Request) {
+  // Create a fresh Prisma client immediately to avoid prepared statement issues
+  const freshPrisma = prismaClientSingleton();
+  
   try {
     // Check authentication
     const session = await getServerSession(authOptions);
@@ -14,72 +17,61 @@ export async function GET(request: Request) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    // Create a fresh Prisma client to avoid prepared statement issues
-    const freshPrisma = prismaClientSingleton();
+    // Handle both normal and hardcoded user IDs
+    const userId = session.user.id;
     
-    try {
-      // Handle both normal and hardcoded user IDs
-      const userId = session.user.id;
+    // For hardcoded users, check if jobs exist or create a demo job
+    if (userId.startsWith('hardcoded-')) {
+      // Get username from the hardcoded ID
+      const username = userId.replace('hardcoded-', '');
       
-      // For hardcoded users, check if jobs exist or create a demo job
-      if (userId.startsWith('hardcoded-')) {
-        // Get username from the hardcoded ID
-        const username = userId.replace('hardcoded-', '');
-        
-        // Check if this hardcoded user has any jobs
-        const existingJobs = await freshPrisma.job.findMany({
-          where: {
-            name: {
-              contains: `Demo for ${username}`
-            }
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        });
-        
-        if (existingJobs.length > 0) {
-          return NextResponse.json({ jobs: existingJobs });
-        }
-        
-        // If no jobs exist, return an empty array
-        // We'll create a demo job in the POST handler if needed
-        return NextResponse.json({ jobs: [] });
-      }
-      
-      // For regular users, fetch from database
-      const jobs = await freshPrisma.job.findMany({
+      // Check if this hardcoded user has any jobs
+      const existingJobs = await freshPrisma.job.findMany({
         where: {
-          userId: userId,
+          name: {
+            contains: `Demo for ${username}`
+          }
         },
         orderBy: {
           createdAt: 'desc',
         },
       });
-
-      return NextResponse.json({ jobs });
-    } catch (error) {
-      console.error('Database query error:', error);
-      return NextResponse.json(
-        { message: 'Database query failed', error: String(error) },
-        { status: 500 }
-      );
-    } finally {
-      // Clean up the Prisma client
-      await freshPrisma.$disconnect();
+      
+      if (existingJobs.length > 0) {
+        return NextResponse.json({ jobs: existingJobs });
+      }
+      
+      // If no jobs exist, return an empty array
+      // We'll create a demo job in the POST handler if needed
+      return NextResponse.json({ jobs: [] });
     }
+    
+    // For regular users, fetch from database
+    const jobs = await freshPrisma.job.findMany({
+      where: {
+        userId: userId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    return NextResponse.json({ jobs });
   } catch (error) {
-    console.error('Get jobs error:', error);
+    console.error('Database query error:', error);
     return NextResponse.json(
-      { message: 'Failed to fetch jobs' },
+      { message: 'Database query failed', error: String(error) },
       { status: 500 }
     );
+  } finally {
+    // Clean up the Prisma client
+    await freshPrisma.$disconnect();
   }
 }
 
 // POST /api/jobs - Create a new job
 export async function POST(request: Request) {
-  // Create a fresh Prisma client to avoid prepared statement issues
+  // Create a fresh Prisma client immediately to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
@@ -90,7 +82,8 @@ export async function POST(request: Request) {
     }
 
     // Parse request body
-    const { sheetUrl, columnName, jobName } = await request.json();
+    const body = await request.json();
+    const { sheetUrl, columnName, jobName } = body;
     
     // Validate inputs
     if (!sheetUrl || !columnName) {
@@ -225,47 +218,39 @@ export async function POST(request: Request) {
       );
     }
 
-    try {
-      // Check if the user actually exists in the database before creating a job
-      const user = await freshPrisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true }
-      });
-      
-      if (!user) {
-        return NextResponse.json(
-          { message: 'User does not exist in database' },
-          { status: 400 }
-        );
-      }
-      
-      // Create a new job in the database
-      const job = await freshPrisma.job.create({
-        data: {
-          sheetUrl,
-          columnName,
-          status: 'pending',
-          totalUrls: urls.length,
-          userId: userId,
-          name: jobName || `${columnName} extraction`,
-        },
-      });
-
-      // Start the scraping process in the background
-      startEmailScraping(job.id, urls);
-
-      return NextResponse.json({ job }, { status: 201 });
-    } catch (error) {
-      console.error('Database operation error:', error);
+    // Check if the user actually exists in the database before creating a job
+    const user = await freshPrisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true }
+    });
+    
+    if (!user) {
       return NextResponse.json(
-        { message: 'Failed to create job in database', error: String(error) },
-        { status: 500 }
+        { message: 'User does not exist in database' },
+        { status: 400 }
       );
     }
+    
+    // Create a new job in the database
+    const job = await freshPrisma.job.create({
+      data: {
+        sheetUrl,
+        columnName,
+        status: 'pending',
+        totalUrls: urls.length,
+        userId: userId,
+        name: jobName || `${columnName} extraction`,
+      },
+    });
+
+    // Start the scraping process in the background
+    startEmailScraping(job.id, urls);
+
+    return NextResponse.json({ job }, { status: 201 });
   } catch (error) {
     console.error('Create job error:', error);
     return NextResponse.json(
-      { message: 'Failed to create job' },
+      { message: 'Failed to create job', error: String(error) },
       { status: 500 }
     );
   } finally {
