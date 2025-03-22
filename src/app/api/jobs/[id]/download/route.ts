@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
+import { hardcodedJobs } from '../route';
 
 // Function to find common email from set of similar emails
 const findCommonEmail = (emails: string[]): string => {
@@ -118,6 +119,7 @@ export async function GET(
   try {
     // Get the id from params
     const id = context.params.id;
+    console.log(`Download requested for job ID: ${id}`);
     
     // Check authentication
     const session = await getServerSession(authOptions);
@@ -129,42 +131,74 @@ export async function GET(
       return new Response('Job ID is required', { status: 400 });
     }
     
-    // Handle hardcoded users with demo job IDs
+    // Get user ID
     const userId = session.user.id;
-    if (userId.startsWith('hardcoded-') && id.startsWith('demo-')) {
-      // Generate mock results for CSV
-      const mockResults = [
-        { website: 'example.com', email: 'contact@example.com' },
-        { website: 'demo-site.com', email: 'info@demo-site.com' },
-        { website: 'test-company.com', email: 'hello@test-company.com' },
-        { website: 'acme.org', email: 'support@acme.org' },
-        { website: 'business.net', email: 'sales@business.net' }
-      ];
+    console.log(`User ID: ${userId}`);
+    
+    // For hardcoded users, check in-memory store first
+    if (userId.startsWith('hardcoded-')) {
+      console.log(`Checking in-memory store for job ${id}`);
       
-      // Generate CSV
-      let csv = 'Website,Email\n';
-      mockResults.forEach((result) => {
-        csv += `"${result.website}","${result.email || ''}"\n`;
-      });
+      // If we have the job in our in-memory store, use that data
+      if (hardcodedJobs.has(id)) {
+        console.log(`Found job ${id} in memory store`);
+        const job = hardcodedJobs.get(id);
+        
+        // Generate CSV from in-memory results
+        let csv = 'Website,Email\n';
+        job.results.forEach((result: { website: string, email: string | null }) => {
+          csv += `"${result.website}","${result.email || ''}"\n`;
+        });
 
-      const headers = new Headers();
-      headers.append('Content-Type', 'text/csv');
-      headers.append(
-        'Content-Disposition',
-        `attachment; filename="emails-${id}.csv"`
-      );
+        const headers = new Headers();
+        headers.append('Content-Type', 'text/csv');
+        headers.append(
+          'Content-Disposition',
+          `attachment; filename="emails-${id}.csv"`
+        );
 
-      return new Response(csv, {
-        headers,
-      });
+        return new Response(csv, {
+          headers,
+        });
+      }
+      
+      // If not in memory store but is a demo job, return mock data
+      if (id.startsWith('demo-')) {
+        console.log(`Generating mock CSV for demo job ${id}`);
+        // Generate mock results for CSV
+        const mockResults = [
+          { website: 'example.com', email: 'contact@example.com' },
+          { website: 'demo-site.com', email: 'info@demo-site.com' },
+          { website: 'test-company.com', email: 'hello@test-company.com' },
+          { website: 'acme.org', email: 'support@acme.org' },
+          { website: 'business.net', email: 'sales@business.net' }
+        ];
+        
+        // Generate CSV
+        let csv = 'Website,Email\n';
+        mockResults.forEach((result) => {
+          csv += `"${result.website}","${result.email || ''}"\n`;
+        });
+
+        const headers = new Headers();
+        headers.append('Content-Type', 'text/csv');
+        headers.append(
+          'Content-Disposition',
+          `attachment; filename="emails-${id}.csv"`
+        );
+
+        return new Response(csv, {
+          headers,
+        });
+      }
     }
 
+    // Standard flow for real users with database access
+    console.log(`Fetching job ${id} from database`);
     try {
       // Fetch the job
       const job = await freshPrisma.job.findUnique({
-        where: {
-          id,
-        },
+        where: { id },
       });
 
       if (!job) {
@@ -172,19 +206,17 @@ export async function GET(
       }
 
       // Check if the job belongs to the current user
-      if (job.userId !== session.user.id) {
+      if (job.userId !== userId) {
         return new Response('Unauthorized', { status: 403 });
       }
 
       // Fetch the job results
       const results = await freshPrisma.result.findMany({
-        where: {
-          jobId: id,
-        },
-        orderBy: {
-          createdAt: 'asc',
-        },
+        where: { jobId: id },
+        orderBy: { createdAt: 'asc' },
       });
+
+      console.log(`Found ${results.length} results for job ${id}`);
 
       // Clean and group emails
       const cleanedResults = groupAndCleanEmails(results);

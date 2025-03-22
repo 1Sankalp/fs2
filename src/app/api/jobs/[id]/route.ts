@@ -1,207 +1,212 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../../lib/auth';
-import { prismaClientSingleton } from '../../../../lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { prismaClientSingleton } from '@/lib/prisma';
+
+// Create an in-memory job storage for hardcoded users
+// This needs to be exported so other routes can access it
+export const hardcodedJobs = new Map<string, any>();
 
 export async function GET(
   request: NextRequest,
-  context: any
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    // Get the id from params
-    const id = context.params.id;
-    
+    const id = params.id;
+    console.log(`Getting job details for job ID: ${id}`);
+
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (!id) {
-      return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
-    }
-    
-    // Get the user ID
     const userId = session.user.id;
-    
-    // For hardcoded users with demo job IDs, try the database first
+    console.log(`User ID: ${userId}`);
+
+    // For hardcoded users, check in-memory store first
     if (userId.startsWith('hardcoded-')) {
-      try {
-        // First try to find a real job
-        const job = await freshPrisma.job.findUnique({
-          where: { id },
-        });
-
-        // If we found a real job that belongs to this user, return that with its results
-        if (job && job.userId === userId) {
-          const results = await freshPrisma.result.findMany({
-            where: { jobId: id },
-            orderBy: { createdAt: 'asc' },
-          });
-
-          return NextResponse.json({
-            job,
-            results,
-          });
-        }
-      } catch (err) {
-        console.error('Error finding real job for hardcoded user:', err);
-      }
+      console.log(`Checking in-memory store for job ${id}`);
       
-      // If no real job found and it's a demo-id, return mock data as fallback
-      if (id.startsWith('demo-')) {
-        // Generate mock data for hardcoded users
-        const username = userId.replace('hardcoded-', '');
-        const mockJob = {
-          id: id,
-          name: `Demo for ${username}`,
-          sheetUrl: 'https://docs.google.com/spreadsheets/d/example',
-          columnName: 'Website',
-          status: 'completed',
-          totalUrls: 5,
-          processedUrls: 5,
-          progress: 100,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          userId: userId
-        };
-        
-        const mockResults = [
-          { id: `result-1-${id}`, website: 'example.com', email: 'contact@example.com', createdAt: new Date(), jobId: id },
-          { id: `result-2-${id}`, website: 'demo-site.com', email: 'info@demo-site.com', createdAt: new Date(), jobId: id },
-          { id: `result-3-${id}`, website: 'test-company.com', email: 'hello@test-company.com', createdAt: new Date(), jobId: id },
-          { id: `result-4-${id}`, website: 'acme.org', email: 'support@acme.org', createdAt: new Date(), jobId: id },
-          { id: `result-5-${id}`, website: 'business.net', email: 'sales@business.net', createdAt: new Date(), jobId: id }
-        ];
+      // If we have the job in our in-memory store, use that data
+      if (hardcodedJobs.has(id)) {
+        console.log(`Found job ${id} in memory store`);
+        const job = hardcodedJobs.get(id);
         
         return NextResponse.json({
-          job: mockJob,
-          results: mockResults
+          id: job.id,
+          name: job.name,
+          status: job.status,
+          createdAt: job.createdAt,
+          updatedAt: job.updatedAt,
+          progress: job.progress || 0,
+          totalWebsites: job.totalWebsites || 0,
+          processedWebsites: job.processedWebsites || 0,
+          results: job.results || []
         });
+      }
+
+      // If not in memory but is a demo job, return demo data
+      if (id.startsWith('demo-')) {
+        console.log(`Generating mock data for demo job ${id}`);
+        // Generate a mock job with details
+        const mockJob = {
+          id,
+          name: 'Demo Google Sheet',
+          status: 'completed',
+          createdAt: new Date(Date.now() - 3600000).toISOString(),
+          updatedAt: new Date().toISOString(),
+          progress: 100,
+          totalWebsites: 5,
+          processedWebsites: 5,
+          results: [
+            { website: 'example.com', email: 'contact@example.com' },
+            { website: 'demo-site.com', email: 'info@demo-site.com' },
+            { website: 'test-company.com', email: 'hello@test-company.com' },
+            { website: 'acme.org', email: 'support@acme.org' },
+            { website: 'business.net', email: 'sales@business.net' }
+          ]
+        };
+        
+        return NextResponse.json(mockJob);
       }
     }
 
+    // Standard database access for real users or non-demo jobs
+    console.log(`Fetching job ${id} from database`);
+    
     try {
-      // Standard case: fetch the job from database
+      // Find the job in the database
       const job = await freshPrisma.job.findUnique({
         where: { id },
+        include: {
+          results: {
+            orderBy: { createdAt: 'asc' },
+          },
+        },
       });
 
       if (!job) {
-        return NextResponse.json({ message: 'Job not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
 
       // Check if the job belongs to the current user
       if (job.userId !== userId) {
-        return NextResponse.json({ message: 'Unauthorized' }, { status: 403 });
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
 
-      // Fetch the job results
-      const results = await freshPrisma.result.findMany({
-        where: { jobId: id },
-        orderBy: { createdAt: 'asc' },
-      });
+      // Calculate progress
+      const totalWebsites = job.totalWebsites || 0;
+      const processedWebsites = job.results.length;
+      const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
 
       return NextResponse.json({
-        job,
-        results,
+        ...job,
+        progress,
+        totalWebsites,
+        processedWebsites,
       });
     } catch (error) {
-      console.error('Database query error:', error);
+      console.error('Database operation error:', error);
       return NextResponse.json(
-        { message: 'Database query failed', error: String(error) },
+        { error: `Database error: ${String(error)}` },
         { status: 500 }
       );
     }
   } catch (error) {
-    console.error('Get job details error:', error);
+    console.error('Get job error:', error);
     return NextResponse.json(
-      { message: 'Failed to fetch job details' },
+      { error: 'Failed to get job' },
       { status: 500 }
     );
   } finally {
-    // Clean up the Prisma client
     await freshPrisma.$disconnect();
   }
 }
 
 export async function DELETE(
   request: NextRequest,
-  context: any
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    // Get the id from params
-    const id = context.params.id;
-    
+    const id = params.id;
+    console.log(`Deleting job ID: ${id}`);
+
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (!id) {
-      return NextResponse.json({ message: 'Job ID is required' }, { status: 400 });
-    }
-    
-    // Handle hardcoded users with demo jobs - just return success
     const userId = session.user.id;
-    if (userId.startsWith('hardcoded-') && id.startsWith('demo-')) {
-      return NextResponse.json({ success: true });
+    console.log(`User ID: ${userId}`);
+
+    // For hardcoded users and in-memory jobs, just remove from memory
+    if (userId.startsWith('hardcoded-')) {
+      console.log(`Checking if job ${id} exists in memory store`);
+      
+      // Delete from in-memory if it exists
+      if (hardcodedJobs.has(id)) {
+        console.log(`Deleting job ${id} from memory store`);
+        hardcodedJobs.delete(id);
+        return NextResponse.json({ success: true });
+      }
+      
+      // For demo jobs, just return success (nothing to delete)
+      if (id.startsWith('demo-')) {
+        return NextResponse.json({ success: true });
+      }
     }
 
+    // For real users and database jobs
+    console.log(`Attempting to delete job ${id} from database`);
+    
     try {
-      // Fetch the job to ensure it exists and belongs to the user
+      // Find the job first
       const job = await freshPrisma.job.findUnique({
-        where: {
-          id: id,
-        },
+        where: { id },
       });
 
       if (!job) {
-        return NextResponse.json({ message: 'Job not found' }, { status: 404 });
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
 
       // Check if the job belongs to the current user
-      if (job.userId !== session.user.id) {
-        return NextResponse.json({ message: 'Unauthorized' }, { status: 403 });
+      if (job.userId !== userId) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
 
-      // First delete all results for this job
+      // Delete the job results first (due to foreign key constraints)
       await freshPrisma.result.deleteMany({
-        where: {
-          jobId: id,
-        },
+        where: { jobId: id },
       });
 
       // Then delete the job
       await freshPrisma.job.delete({
-        where: {
-          id: id,
-        },
+        where: { id },
       });
 
       return NextResponse.json({ success: true });
     } catch (error) {
       console.error('Database operation error:', error);
       return NextResponse.json(
-        { message: 'Failed to delete job from database', error: String(error) },
+        { error: `Database error: ${String(error)}` },
         { status: 500 }
       );
     }
   } catch (error) {
     console.error('Delete job error:', error);
     return NextResponse.json(
-      { message: 'Failed to delete job' },
+      { error: 'Failed to delete job' },
       { status: 500 }
     );
   } finally {
-    // Clean up the Prisma client
     await freshPrisma.$disconnect();
   }
 } 
