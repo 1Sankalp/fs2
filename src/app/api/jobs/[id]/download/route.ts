@@ -110,7 +110,7 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: Request,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   try {
     // Check authentication
@@ -120,7 +120,7 @@ export async function GET(
     }
 
     // Use destructuring to handle route params to satisfy Next.js requirements
-    const { id } = params;
+    const { id } = context.params;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
