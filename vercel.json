@@ -4,6 +4,8 @@
   "outputDirectory": ".next",
   "framework": "nextjs",
   "env": {
-    "PRISMA_CLIENT_ENGINE_TYPE": "dataproxy"
+    "PRISMA_CLIENT_ENGINE_TYPE": "dataproxy",
+    "POSTGRES_PRISMA_EXTENSION_SCHEMA": "public",
+    "POSTGRES_STATEMENT_TIMEOUT": "60000"
   }
 } 
