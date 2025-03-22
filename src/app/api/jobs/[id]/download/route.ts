@@ -108,15 +108,9 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
-interface RouteSegmentProps {
-  params: {
-    id: string;
-  };
-}
-
 export async function GET(
   request: NextRequest,
-  { params }: RouteSegmentProps
+  { params }: { params: { id: string } }
 ) {
   try {
     // Check authentication
