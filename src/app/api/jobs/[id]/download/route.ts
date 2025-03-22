@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
@@ -108,9 +108,15 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
+interface RouteSegmentProps {
+  params: {
+    id: string;
+  };
+}
+
 export async function GET(
-  request: Request,
-  context: { params: { id: string } }
+  request: NextRequest,
+  { params }: RouteSegmentProps
 ) {
   try {
     // Check authentication
@@ -119,8 +125,8 @@ export async function GET(
       return new Response('Unauthorized', { status: 401 });
     }
 
-    // Use destructuring to handle route params to satisfy Next.js requirements
-    const { id } = context.params;
+    // Use destructuring to handle route params
+    const { id } = params;
     if (!id) {
       return new Response('Job ID is required', { status: 400 });
     }
