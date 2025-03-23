@@ -18,12 +18,12 @@ function DashboardContent() {
   const [activeTab, setActiveTab] = useState<'new' | 'jobs'>(
     tabParam === 'jobs' ? 'jobs' : 'new'
   );
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [jobs, setJobs] = useState([]);
+  const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [refreshingJobs, setRefreshingJobs] = useState<string[]>([]);
 
   // Update URL when tab changes
   useEffect(() => {
@@ -34,7 +34,38 @@ function DashboardContent() {
     window.history.replaceState(null, '', newUrl);
   }, [activeTab]);
 
-  // Handle job refresh manually
+  // Get details about a specific job
+  const refreshJobDetails = async (jobId: string) => {
+    try {
+      // Mark this job as refreshing
+      setRefreshingJobs(prev => [...prev, jobId]);
+      
+      const response = await fetch(`/api/jobs/${jobId}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch job: ${response.status}`);
+      }
+      const data = await response.json();
+      
+      if (data.job) {
+        // Update just this job in the state
+        setJobs(prevJobs => 
+          prevJobs.map(job => 
+            job.id === jobId ? data.job : job
+          )
+        );
+        return data.job;
+      }
+      return null;
+    } catch (error) {
+      console.error(`Error refreshing job ${jobId}:`, error);
+      return null;
+    } finally {
+      // Remove this job from refreshing state
+      setRefreshingJobs(prev => prev.filter(id => id !== jobId));
+    }
+  };
+
+  // Handle job refresh manually for all jobs
   const refreshJobs = async () => {
     setLoading(true);
     try {
@@ -96,8 +127,14 @@ function DashboardContent() {
     if (autoRefreshEnabled) {
       autoRefreshIntervalRef.current = setInterval(() => {
         // Only auto-refresh if the jobs tab is active
-        if (activeTab === 'jobs') {
-          refreshJobs();
+        if (activeTab === 'jobs' && jobs.length > 0) {
+          // Instead of refreshing all jobs, refresh each one individually
+          jobs.forEach(job => {
+            if (job.status === 'processing') {
+              // Only auto-refresh jobs that are still processing
+              refreshJobDetails(job.id);
+            }
+          });
         }
       }, 5000); // 5 seconds interval
     }
@@ -107,7 +144,7 @@ function DashboardContent() {
         clearInterval(autoRefreshIntervalRef.current);
       }
     };
-  }, [autoRefreshEnabled, activeTab]);
+  }, [autoRefreshEnabled, activeTab, jobs]);
 
   if (!session) {
     return null; // Will redirect to login page due to the useEffect in parent
@@ -211,6 +248,8 @@ function DashboardContent() {
                     error={error} 
                     onRefresh={refreshJobs}
                     onDelete={handleJobDeleted}
+                    onRefreshJob={refreshJobDetails}
+                    refreshingJobs={refreshingJobs}
                   />
                 </motion.div>
               )}
@@ -261,12 +300,14 @@ function DashboardLoading() {
 }
 
 // Add the JobsList component
-const JobsList = ({ jobs, loading, error, onRefresh, onDelete }: { 
+const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, refreshingJobs }: { 
   jobs: any[], 
   loading: boolean, 
   error: string | null, 
   onRefresh: () => Promise<any[]>, 
-  onDelete: (jobId: string) => Promise<void> 
+  onDelete: (jobId: string) => Promise<void>,
+  onRefreshJob: (jobId: string) => Promise<any>,
+  refreshingJobs: string[]
 }) => {
   const [refreshing, setRefreshing] = useState(false);
   
@@ -283,6 +324,17 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete }: {
       return [];
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleRefreshJob = async (jobId: string) => {
+    try {
+      const refreshedJob = await onRefreshJob(jobId);
+      console.log('Refreshed single job:', refreshedJob);
+      return refreshedJob;
+    } catch (error) {
+      console.error(`Error refreshing job ${jobId}:`, error);
+      return null;
     }
   };
 
@@ -449,87 +501,106 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete }: {
               </th>
             </tr>
           </thead>
-          <tbody className={`bg-white divide-y divide-slate-100 ${refreshing ? 'opacity-60' : ''}`}>
-            {jobs.map((job) => (
-              <tr key={job.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="flex items-center">
-                    {getStatusIcon(job.status || 'pending')}
-                    <span className="ml-2 text-sm text-slate-700">
-                      {getStatusText(job.status || 'pending')}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="flex flex-col">
-                    <Link href={`/dashboard/results/${job.id}`} className="text-sm text-slate-900 mb-1 font-medium hover:text-primary-600">
-                      {job.name || `${job.columnName} extraction`}
-                    </Link>
-                    <span className="text-xs text-slate-500">
-                      Column: {job.columnName}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="flex flex-col space-y-1">
-                    <div className="flex justify-between text-xs text-slate-500 mb-1">
-                      <span>{(job.processedUrls || job.processedWebsites || 0)} of {(job.totalUrls || job.totalWebsites || 0)}</span>
-                      <span>
-                        {(job.totalUrls || job.totalWebsites) > 0
-                          ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
-                          : 0}%
+          <tbody className="bg-white divide-y divide-slate-100">
+            {jobs.map((job) => {
+              const isRefreshing = refreshingJobs.includes(job.id);
+              
+              return (
+                <tr key={job.id} className={`hover:bg-slate-50/50 transition-colors ${isRefreshing ? 'bg-slate-50/30' : ''}`}>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="flex items-center">
+                      {isRefreshing ? (
+                        <FiLoader className="text-blue-500 animate-spin" size={16} />
+                      ) : (
+                        getStatusIcon(job.status || 'pending')
+                      )}
+                      <span className="ml-2 text-sm text-slate-700">
+                        {isRefreshing ? 'Updating...' : getStatusText(job.status || 'pending')}
                       </span>
                     </div>
-                    <div className="w-full bg-slate-200 rounded-full h-1.5">
-                      <div 
-                        className="bg-primary-600 h-1.5 rounded-full"
-                        style={{ 
-                          width: `${(job.totalUrls || job.totalWebsites) > 0 
-                            ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
-                            : 0}%` 
-                        }}
-                      />
-                    </div>
-                    {(job.status === 'processing') && (
-                      <div className="mt-1 text-xs text-blue-600 flex items-center">
-                        <FiClock className="mr-1" size={12} />
-                        <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
-                      </div>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
-                  {new Date(job.createdAt).toLocaleString()}
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
-                  <div className="flex space-x-2">
-                    <Link
-                      href={`/dashboard/results/${job.id}`}
-                      className="text-primary-600 hover:text-primary-800"
-                    >
-                      <FiSearch size={16} className="inline mr-1" /> View
-                    </Link>
-                    
-                    {job.status === 'completed' && (
-                      <Link
-                        href={`/api/jobs/${job.id}/download`}
-                        className="text-emerald-600 hover:text-emerald-800 ml-2"
-                      >
-                        <FiDownload size={16} className="inline mr-1" /> Download
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="flex flex-col">
+                      <Link href={`/dashboard/results/${job.id}`} className="text-sm text-slate-900 mb-1 font-medium hover:text-primary-600">
+                        {job.name || `${job.columnName} extraction`}
                       </Link>
-                    )}
-                    
-                    <button
-                      onClick={() => handleDeleteJob(job.id)}
-                      className="text-red-600 hover:text-red-800 ml-2"
-                      disabled={refreshing}
-                    >
-                      <FiTrash2 size={16} className="inline mr-1" /> Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                      <span className="text-xs text-slate-500">
+                        Column: {job.columnName}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="flex flex-col space-y-1">
+                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                        <span>{(job.processedUrls || job.processedWebsites || 0)} of {(job.totalUrls || job.totalWebsites || 0)}</span>
+                        <span>
+                          {(job.totalUrls || job.totalWebsites) > 0
+                            ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                            : 0}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-1.5">
+                        <div 
+                          className={`h-1.5 rounded-full ${isRefreshing ? 'bg-blue-500' : 'bg-primary-600'}`}
+                          style={{ 
+                            width: `${(job.totalUrls || job.totalWebsites) > 0 
+                              ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                              : 0}%` 
+                          }}
+                        />
+                      </div>
+                      {(job.status === 'processing' || isRefreshing) && (
+                        <div className="mt-1 text-xs text-blue-600 flex items-center">
+                          <FiClock className="mr-1" size={12} />
+                          <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
+                    {new Date(job.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                    <div className="flex space-x-2">
+                      <Link
+                        href={`/dashboard/results/${job.id}`}
+                        className="text-primary-600 hover:text-primary-800"
+                      >
+                        <FiSearch size={16} className="inline mr-1" /> View
+                      </Link>
+                      
+                      {job.status === 'completed' && (
+                        <Link
+                          href={`/api/jobs/${job.id}/download`}
+                          className="text-emerald-600 hover:text-emerald-800 ml-2"
+                        >
+                          <FiDownload size={16} className="inline mr-1" /> Download
+                        </Link>
+                      )}
+                      
+                      <button
+                        onClick={() => handleDeleteJob(job.id)}
+                        className="text-red-600 hover:text-red-800 ml-2"
+                        disabled={isRefreshing || refreshing}
+                      >
+                        <FiTrash2 size={16} className="inline mr-1" /> Delete
+                      </button>
+                      
+                      {job.status === 'processing' && (
+                        <button
+                          onClick={() => handleRefreshJob(job.id)}
+                          className="text-blue-600 hover:text-blue-800 ml-2"
+                          disabled={isRefreshing}
+                        >
+                          <FiRefreshCw size={16} className={`inline mr-1 ${isRefreshing ? 'animate-spin' : ''}`} /> 
+                          {isRefreshing ? 'Updating' : 'Update'}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

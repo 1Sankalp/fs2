@@ -223,6 +223,87 @@ export const hardcodedJobs = {
   generateJobId: () => uuidv4(),
 };
 
+// Function to get a job by ID
+export async function getJobById(jobId: string) {
+  // First check the in-memory store
+  const memoryJob = hardcodedJobs.get(jobId);
+  if (memoryJob) {
+    return memoryJob;
+  }
+  
+  // If not found in memory, try the database
+  try {
+    const prisma = prismaClientSingleton();
+    const dbJob = await prisma.job.findUnique({
+      where: { id: jobId },
+      include: { results: true }
+    });
+    
+    if (!dbJob) {
+      return null;
+    }
+    
+    // Create a properly formatted job
+    const formattedJob: HardcodedJob = {
+      id: dbJob.id,
+      name: dbJob.name || 'Unnamed Job',
+      status: dbJob.status,
+      sheetUrl: dbJob.sheetUrl,
+      columnName: dbJob.columnName,
+      totalWebsites: dbJob.totalUrls,
+      processedWebsites: dbJob.results.length,
+      results: dbJob.results.map(r => ({
+        website: r.website,
+        email: r.email || null
+      })),
+      createdAt: dbJob.createdAt.toISOString(),
+      updatedAt: dbJob.updatedAt.toISOString(),
+      userId: dbJob.userId
+    };
+    
+    // Add to in-memory store for future
+    hardcodedJobs.set(jobId, formattedJob);
+    
+    await prisma.$disconnect();
+    return formattedJob;
+  } catch (error) {
+    console.error(`Error fetching job ${jobId} from database:`, error);
+    return null;
+  }
+}
+
+// Function to delete a job by ID
+export async function deleteJob(jobId: string) {
+  console.log(`Attempting to delete job: ${jobId}`);
+  
+  // First delete from in-memory store
+  const deletedFromMemory = hardcodedJobs.delete(jobId);
+  
+  // Then try to delete from database
+  try {
+    const prisma = prismaClientSingleton();
+    
+    // First delete associated results (due to foreign key constraints)
+    await prisma.result.deleteMany({
+      where: { jobId: jobId }
+    });
+    
+    // Then delete the job
+    await prisma.job.delete({
+      where: { id: jobId }
+    });
+    
+    await prisma.$disconnect();
+    console.log(`Successfully deleted job ${jobId} from both memory and database`);
+    return true;
+  } catch (error) {
+    console.error(`Error deleting job ${jobId} from database:`, error);
+    
+    // Return true if at least we deleted from memory
+    return deletedFromMemory;
+  }
+}
+
 // Debug function to print all in-memory jobs
 export function logAllJobs() {
   console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size()}`);
