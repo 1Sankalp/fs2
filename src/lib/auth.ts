@@ -83,8 +83,12 @@ if (typeof window === 'undefined' && adapterSetup.client) {
   });
 }
 
-// Hardcoded user authentication without using Prisma
-// This avoids prepared statement issues completely
+// Add this function to ensure consistent user ID format
+export function getHardcodedUserId(username: string): string {
+  return `hardcoded-${username.toLowerCase()}`;
+}
+
+// Update the authenticateUser function to use consistent user IDs
 async function authenticateUser(email: string, password: string) {
   // Check against our hardcoded users first (faster and avoids DB)
   const username = email.includes('@') ? email.split('@')[0] : email;
@@ -93,7 +97,7 @@ async function authenticateUser(email: string, password: string) {
   if (hardcodedUser && hardcodedUser.password === password) {
     // Return a user object that matches our database format
     return {
-      id: `hardcoded-${username}`,
+      id: getHardcodedUserId(username),
       email: `${username}@example.com`,
       name: username
     };

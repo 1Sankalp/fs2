@@ -52,6 +52,8 @@ export async function GET(request: NextRequest) {
             updatedAt: job.updatedAt,
             userId: userId
           });
+        } else {
+          console.log(`Skipping job ${key} as it belongs to user ${job.userId}, not ${userId}`);
         }
       });
       
@@ -76,7 +78,7 @@ export async function GET(request: NextRequest) {
         console.log(`Found ${dbJobs.length} database jobs for user ${userId}`);
         if (dbJobs.length > 0) {
           dbJobs.forEach(job => {
-            console.log(`DB job: ${job.id} - Status: ${job.status}`);
+            console.log(`DB job: ${job.id} - User: ${job.userId} - Status: ${job.status}`);
           });
         }
       } catch (dbError) {
@@ -220,12 +222,12 @@ export async function POST(request: NextRequest) {
               columnName,
               status: 'pending',
               totalUrls: urls.length,
-              userId: userId,
+              userId: userId, // Already contains hardcoded-username
               name: jobName || `${columnName} extraction`,
             },
           });
           
-          console.log(`Created database job for hardcoded user: ${dbJob.id}`);
+          console.log(`Created database job for hardcoded user: ${dbJob.id} with user ID: ${userId}`);
           
           // Now also store in memory for real-time processing
           const newJob = {
@@ -245,6 +247,7 @@ export async function POST(request: NextRequest) {
           
           // Store in memory
           hardcodedJobs.set(jobId, newJob);
+          console.log(`Stored job ${jobId} in memory for user ${userId}`);
           
           // Start processing in background
           setTimeout(() => {
@@ -287,6 +290,7 @@ export async function POST(request: NextRequest) {
           
           // Store in memory only
           hardcodedJobs.set(jobId, newJob);
+          console.log(`Stored job ${jobId} in memory ONLY for user ${userId} (database save failed)`);
           
           // Start processing in background
           setTimeout(() => {

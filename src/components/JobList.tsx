@@ -24,21 +24,46 @@ export default function JobList() {
   const [error, setError] = useState<string | null>(null);
   const [deletingJob, setDeletingJob] = useState<string | null>(null);
 
-  const fetchJobs = async () => {
+  const fetchJobs = async (retryCount = 0, maxRetries = 2) => {
     try {
       setLoading(true);
       setError(null);
       
+      console.log("Fetching jobs, attempt:", retryCount + 1);
       const res = await fetch('/api/jobs');
+      
       if (!res.ok) {
-        throw new Error('Failed to fetch jobs');
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Failed to fetch jobs');
       }
       
       const data = await res.json();
-      setJobs(data.jobs || []);
+      console.log("Received jobs:", data.jobs?.length || 0);
+      
+      if (data.jobs && Array.isArray(data.jobs)) {
+        // Log detailed job info for debugging
+        data.jobs.forEach((job: Job) => {
+          console.log(`Job: ${job.id}, User: ${(job as any).userId || 'unknown'}, Status: ${job.status}`);
+        });
+        
+        setJobs(data.jobs);
+      } else {
+        console.error('Invalid jobs data structure:', data);
+        setJobs([]);
+      }
     } catch (err) {
       console.error('Error fetching jobs:', err);
+      
+      if (retryCount < maxRetries) {
+        console.log(`Retrying fetch jobs (attempt ${retryCount + 1} of ${maxRetries})`);
+        setTimeout(() => {
+          fetchJobs(retryCount + 1, maxRetries);
+        }, 1000 * (retryCount + 1)); // Exponential backoff
+        return;
+      }
+      
       setError('Failed to load jobs. Please try again.');
+      setJobs([]);
     } finally {
       setLoading(false);
     }
@@ -170,7 +195,7 @@ export default function JobList() {
         <FiAlertTriangle className="text-red-500 mr-3" size={20} />
         <span className="text-red-700">{error}</span>
         <button 
-          onClick={fetchJobs}
+          onClick={() => fetchJobs()}
           className="ml-auto bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-md text-sm flex items-center"
         >
           <FiRefreshCw className="mr-1" size={14} /> Retry
@@ -210,10 +235,11 @@ export default function JobList() {
       <div className="flex justify-between items-center px-6 py-4 border-b border-gray-200">
         <h2 className="text-lg font-medium text-gray-800">Your Extraction Jobs</h2>
         <button
-          onClick={fetchJobs}
-          className="inline-flex items-center text-sm text-gray-600 hover:text-primary-600 transition-colors"
+          onClick={() => fetchJobs()}
+          className="flex items-center space-x-2 bg-primary-50 hover:bg-primary-100 text-primary-700 py-2 px-3 rounded-md transition-colors text-sm"
         >
-          <FiRefreshCw className="mr-1" size={14} /> Refresh
+          <FiRefreshCw className="mr-1" />
+          <span>Refresh</span>
         </button>
       </div>
       

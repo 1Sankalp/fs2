@@ -103,6 +103,8 @@ export async function loadJobsFromDatabase() {
     
     // Add each job to the in-memory store
     for (const job of dbJobs) {
+      console.log(`Loading job ${job.id} for user ${job.userId} with ${job.results.length} results`);
+      
       hardcodedJobs.set(job.id, {
         id: job.id,
         name: job.name,
@@ -124,6 +126,7 @@ export async function loadJobsFromDatabase() {
     
     await prisma.$disconnect();
     console.log(`Loaded ${hardcodedJobs.size} jobs into memory store`);
+    logAllJobs();  // Log all loaded jobs for debugging
   } catch (error) {
     console.error("Error loading jobs from database:", error);
   }
