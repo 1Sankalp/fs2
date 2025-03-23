@@ -228,43 +228,11 @@ export async function POST(request: NextRequest) {
           // Save to database first
           prisma = prismaClientSingleton();
           
-          // First ensure that the hardcoded user exists in the database
-          const username = userId.replace('hardcoded-', '');
-          const userEmail = `${username}@example.com`;
+          // No need to check for user by email or create it
+          // Just use the hardcoded user ID directly
+          console.log(`Using hardcoded user ID for job creation: ${userId}`);
           
-          // Check if user exists
-          console.log(`Checking if user exists in database: ${userEmail}`);
-          const existingUser = await prisma.user.findUnique({
-            where: { email: userEmail },
-          });
-          
-          // If user doesn't exist, create it
-          if (!existingUser) {
-            console.log(`User not found in database, creating user for ${userId} with email ${userEmail}`);
-            try {
-              const hashedPassword = await hash('funnelstrike@135', 10);
-              await prisma.user.create({
-                data: {
-                  id: userId, // Use the hardcoded ID format
-                  name: username,
-                  email: userEmail,
-                  password: hashedPassword,
-                },
-              });
-              console.log(`Created user ${userId} in database successfully`);
-            } catch (userError) {
-              console.error(`Error creating user in database:`, userError);
-              throw userError; // Re-throw to be caught by outer try/catch
-            }
-          } else {
-            console.log(`User ${userEmail} (${existingUser.id}) already exists in database`);
-          }
-          
-          // Use the actual user ID from the database for the job
-          const actualUserId = existingUser ? existingUser.id : userId;
-          console.log(`Using actual user ID for job creation: ${actualUserId}`);
-          
-          // Now create the job
+          // Create the job using the hardcoded userID
           const dbJob = await prisma.job.create({
             data: {
               id: jobId, // Use our generated ID
@@ -272,12 +240,12 @@ export async function POST(request: NextRequest) {
               columnName,
               status: 'pending',
               totalUrls: urls.length,
-              userId: actualUserId, // Use the actual ID from database
+              userId: userId, // Use the hardcoded ID directly
               name: jobName || `${columnName} extraction`,
             },
           });
           
-          console.log(`Created database job for hardcoded user: ${dbJob.id} with user ID: ${actualUserId}`);
+          console.log(`Created database job for hardcoded user: ${dbJob.id} with user ID: ${userId}`);
           
           // Now also store in memory for real-time processing
           const newJob = {
@@ -292,12 +260,12 @@ export async function POST(request: NextRequest) {
             results: [],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            userId: actualUserId
+            userId: userId
           };
           
           // Store in memory
           hardcodedJobs.set(jobId, newJob);
-          console.log(`Stored job ${jobId} in memory for user ${actualUserId}`);
+          console.log(`Stored job ${jobId} in memory for user ${userId}`);
           
           // Start processing in background
           setTimeout(() => {

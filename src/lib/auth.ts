@@ -27,21 +27,27 @@ export async function ensureUsersExist() {
   try {
     for (const user of USERS) {
       try {
-        // Check if user exists using the fresh client
+        const userId = `hardcoded-${user.username.toLowerCase()}`;
+        
+        // Check if user exists using the fresh client by ID (not email)
         const existingUser = await freshPrisma.user.findUnique({
-          where: { email: `${user.username}@example.com` },
+          where: { id: userId },
         });
 
         if (!existingUser) {
           const hashedPassword = await hash(user.password, 10);
+          // Create user with hardcoded ID format
           await freshPrisma.user.create({
             data: {
+              id: userId, // Use hardcoded ID format
               name: user.username,
-              email: `${user.username}@example.com`,
+              email: `${user.username}@example.com`, // Email is required by schema but we don't use it
               password: hashedPassword,
             },
           });
-          console.log(`Created user: ${user.username}`);
+          console.log(`Created hardcoded user: ${userId}`);
+        } else {
+          console.log(`Hardcoded user ${userId} already exists`);
         }
       } catch (userError) {
         // Log but continue with next user if one fails
