@@ -117,7 +117,7 @@ const syncWithDatabase = async () => {
             // Update results
             const formattedResults = job.results.map(result => ({
               website: result.website,
-              email: result.email
+              email: result.email || null
             }));
             
             memoryJob.results = formattedResults;
@@ -317,7 +317,7 @@ export async function loadJobsFromDatabase() {
     }
     
     await prisma.$disconnect();
-    console.log(`Loaded ${hardcodedJobs.size} jobs into memory store`);
+    console.log(`Loaded ${hardcodedJobs.size()} jobs into memory store`);
     logAllJobs();  // Log all loaded jobs for debugging
   } catch (error) {
     console.error("Error loading jobs from database:", error);
