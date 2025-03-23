@@ -233,24 +233,43 @@ export async function POST(request: NextRequest) {
           const userEmail = `${username}@example.com`;
           
           // Check if user exists
+          console.log(`Checking if user exists in database: ${userEmail}`);
           const existingUser = await prisma.user.findUnique({
             where: { email: userEmail },
           });
           
           // If user doesn't exist, create it
           if (!existingUser) {
-            console.log(`Creating missing user in database for ${userId} with email ${userEmail}`);
-            const hashedPassword = await hash('funnelstrike@135', 10);
-            await prisma.user.create({
-              data: {
-                id: userId, // Use the hardcoded ID format
-                name: username,
-                email: userEmail,
-                password: hashedPassword,
-              },
-            });
-            console.log(`Created user ${userId} in database`);
+            console.log(`User not found in database, creating user for ${userId} with email ${userEmail}`);
+            try {
+              const hashedPassword = await hash('funnelstrike@135', 10);
+              await prisma.user.create({
+                data: {
+                  id: userId, // Use the hardcoded ID format
+                  name: username,
+                  email: userEmail,
+                  password: hashedPassword,
+                },
+              });
+              console.log(`Created user ${userId} in database successfully`);
+            } catch (userError) {
+              console.error(`Error creating user in database:`, userError);
+              throw userError; // Re-throw to be caught by outer try/catch
+            }
+          } else {
+            console.log(`User ${userEmail} (${existingUser.id}) already exists in database`);
           }
+          
+          // Double check user exists before creating the job
+          const verifyUser = await prisma.user.findUnique({
+            where: { id: userId },
+          });
+          
+          if (!verifyUser) {
+            throw new Error(`User ${userId} not found in database after creation attempt`);
+          }
+          
+          console.log(`Verified user ${userId} exists in database, creating job`);
           
           // Now create the job
           const dbJob = await prisma.job.create({
