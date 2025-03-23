@@ -1,1 +1,12 @@
-{}
+{
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/api/jobs/[id]/download/route": "app/api/jobs/[id]/download/route.js",
+  "/api/jobs/[id]/route": "app/api/jobs/[id]/route.js",
+  "/api/sheets/preview/route": "app/api/sheets/preview/route.js",
+  "/api/jobs/route": "app/api/jobs/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/auth/signin/page": "app/auth/signin/page.js",
+  "/dashboard/results/[id]/page": "app/dashboard/results/[id]/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/page": "app/page.js"
+}

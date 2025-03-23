@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST="{}"
+self.__REACT_LOADABLE_MANIFEST='{"app/dashboard/page.tsx -> @/lib/hardcodedJobs":{"id":6942,"files":["static/chunks/942.bd2617ca4ef75621.js"]}}';
