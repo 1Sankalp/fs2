@@ -78,7 +78,7 @@ export async function GET(
       }
 
       // Calculate progress
-      const totalWebsites = job.totalWebsites || 0;
+      const totalWebsites = job.totalUrls || 0;
       const processedWebsites = job.results.length;
       const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
 
