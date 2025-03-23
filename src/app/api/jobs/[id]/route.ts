@@ -41,15 +41,24 @@ export async function GET(request: NextRequest) {
           return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
+        const totalWebsites = job.totalWebsites || 0;
+        const processedWebsites = job.processedWebsites || 0;
+        const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
+
         return NextResponse.json({
-          id: job.id,
-          name: job.name,
-          status: job.status,
-          createdAt: job.createdAt,
-          updatedAt: job.updatedAt,
-          progress: job.progress || 0,
-          totalWebsites: job.totalWebsites || 0,
-          processedWebsites: job.processedWebsites || 0,
+          job: {
+            id: job.id,
+            name: job.name,
+            status: job.status,
+            sheetUrl: job.sheetUrl,
+            columnName: job.columnName,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+            progress: progress,
+            totalUrls: totalWebsites,
+            processedUrls: processedWebsites,
+            userId: job.userId
+          },
           results: job.results || []
         });
       } else {
@@ -82,11 +91,18 @@ export async function GET(request: NextRequest) {
     const processedWebsites = job.results.length;
     const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
 
+    // Format the response to match what the frontend expects
     return NextResponse.json({
-      ...job,
-      progress,
-      totalWebsites,
-      processedWebsites,
+      job: {
+        ...job,
+        progress,
+        totalUrls: totalWebsites,
+        processedUrls: processedWebsites,
+      },
+      results: job.results.map(result => ({
+        website: result.website,
+        email: result.email
+      }))
     });
   } catch (error) {
     console.error('Get job error:', error);

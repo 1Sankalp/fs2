@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { prismaClientSingleton } from './prisma';
 import { parse } from 'tldts';
-import { hardcodedJobs } from './hardcodedJobs';
+import { hardcodedJobs, syncJobToDatabase } from './hardcodedJobs';
 
 // Constants
 const IGNORE_DOMAINS = [
@@ -69,6 +69,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
     // Process URLs in batches
     const batchSize = 5;
     let processedCount = 0;
+    let lastSyncTime = Date.now();
     
     for (let i = 0; i < urls.length; i += batchSize) {
       const batch = urls.slice(i, i + batchSize);
@@ -140,6 +141,14 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
         }
       }));
       
+      // Periodically sync in-memory job to database (every 30 seconds or 10 URLs)
+      const currentTime = Date.now();
+      if (hardcodedJobs.has(jobId) && (currentTime - lastSyncTime > 30000 || processedCount % 10 === 0)) {
+        console.log(`Syncing job ${jobId} progress to database`);
+        await syncJobToDatabase(jobId);
+        lastSyncTime = currentTime;
+      }
+      
       // Small delay between batches to avoid overwhelming system
       await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -150,7 +159,7 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
       data: { status: 'completed' }
     });
     
-    // Update in-memory job if it exists
+    // Update in-memory job if it exists and do final sync
     if (hardcodedJobs.has(jobId)) {
       const memoryJob = hardcodedJobs.get(jobId);
       if (memoryJob) {
@@ -158,6 +167,9 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
         memoryJob.progress = 100;
         memoryJob.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, memoryJob);
+        
+        // Final sync to database
+        await syncJobToDatabase(jobId);
       }
     }
     
@@ -182,6 +194,9 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
         memoryJob.status = 'failed';
         memoryJob.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, memoryJob);
+        
+        // Sync failed status to database
+        await syncJobToDatabase(jobId);
       }
     }
   } finally {

@@ -165,15 +165,30 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
         try {
           setIsLoading(true);
           const response = await fetch(`/api/jobs/${jobId}`);
-          const data = await response.json();
-
+          
           if (!response.ok) {
-            throw new Error(data.message || 'Failed to fetch job results');
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to fetch job results');
           }
+          
+          const data = await response.json();
+          console.log('Fetched job data:', data);
 
-          setJobData(data.job);
-          setResults(data.results || []);
+          if (data.job) {
+            setJobData(data.job);
+          } else {
+            console.error('No job data in response');
+            setError('Invalid job data returned from server');
+          }
+          
+          if (Array.isArray(data.results)) {
+            setResults(data.results);
+          } else {
+            console.error('No results array in response');
+            setResults([]);
+          }
         } catch (error) {
+          console.error('Error fetching job results:', error);
           if (error instanceof Error) {
             setError(error.message);
           } else {
