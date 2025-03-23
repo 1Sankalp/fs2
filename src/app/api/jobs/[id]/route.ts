@@ -140,117 +140,106 @@ export async function DELETE(request: NextRequest) {
     const id = url.pathname.split('/').pop();
 
     if (!id) {
+      console.error('DELETE request missing job ID');
       return NextResponse.json({ error: 'Job ID is required' }, { status: 400 });
     }
 
-    console.log(`Deleting job ID: ${id}`);
+    console.log(`DELETE request for job ID: ${id}`);
 
     const session = await getServerSession(authOptions);
     if (!session) {
-      console.log('No session found - user not authenticated');
+      console.log('DELETE request - No session found');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const userId = session.user.id;
-    console.log(`User ID from session: ${userId}`);
+    console.log(`DELETE request - User ID: ${userId}`);
 
-    // Check for hardcoded users first
-    if (userId.startsWith('hardcoded-')) {
-      console.log(`User is hardcoded, checking memory store for job ${id}`);
-      
-      if (hardcodedJobs.has(id)) {
-        const job = hardcodedJobs.get(id);
-        
-        // Check if this job belongs to this user
-        if (job && job.userId !== userId) {
-          console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
-          return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-        }
-        
-        if (job) {
-          console.log(`Deleting job ${id} from memory store`);
-          hardcodedJobs.delete(id);
-          
-          // Also try to delete from database if it exists there
-          try {
-            freshPrisma = prismaClientSingleton();
-            
-            // Check if job exists in database
-            const dbJob = await freshPrisma.job.findUnique({
-              where: { id },
-            });
-            
-            if (dbJob && dbJob.userId === userId) {
-              // Delete results first
-              await freshPrisma.result.deleteMany({
-                where: { jobId: id },
-              });
-              
-              // Then delete the job
-              await freshPrisma.job.delete({
-                where: { id },
-              });
-              console.log(`Also deleted job ${id} from database`);
-            }
-          } catch (dbError) {
-            // Log but don't fail if database deletion fails
-            console.error(`Failed to delete job ${id} from database:`, dbError);
-          } finally {
-            if (freshPrisma) {
-              await freshPrisma.$disconnect();
-              freshPrisma = null;
-            }
-          }
-          
-          return NextResponse.json({ success: true });
-        }
-      } else {
-        console.log(`Job ${id} not found in memory store for user ${userId}`);
-      }
-    }
-
-    // If we get here, we need to check the database
-    console.log(`Attempting to delete job ${id} from database for user ${userId}`);
-    
     try {
+      // Use the imported deleteJob function from hardcodedJobs
+      const { deleteJob } = await import('@/lib/hardcodedJobs');
+      
+      // First check if the job exists and belongs to the user
       freshPrisma = prismaClientSingleton();
       
-      const job = await freshPrisma.job.findUnique({
-        where: { id },
-      });
-
-      if (!job) {
-        console.log(`Job ${id} not found in database`);
+      // Whether job is in memory or database, we need to check ownership
+      let jobExists = false;
+      let jobBelongsToUser = false;
+      
+      // Check in database first
+      try {
+        const dbJob = await freshPrisma.job.findUnique({
+          where: { id },
+          select: { id: true, userId: true }
+        });
+        
+        if (dbJob) {
+          jobExists = true;
+          jobBelongsToUser = dbJob.userId === userId;
+          console.log(`Job ${id} found in database, belongs to user: ${jobBelongsToUser}`);
+        } else {
+          console.log(`Job ${id} not found in database`);
+        }
+      } catch (dbLookupError) {
+        console.error(`Error checking job ${id} in database:`, dbLookupError);
+      }
+      
+      // If not in database or ownership check failed, check in memory
+      if (!jobExists || !jobBelongsToUser) {
+        const { hardcodedJobs } = await import('@/lib/hardcodedJobs');
+        if (hardcodedJobs.has(id)) {
+          const memoryJob = hardcodedJobs.get(id);
+          jobExists = true;
+          jobBelongsToUser = memoryJob?.userId === userId;
+          console.log(`Job ${id} found in memory, belongs to user: ${jobBelongsToUser}`);
+        } else {
+          console.log(`Job ${id} not found in memory`);
+        }
+      }
+      
+      // If job doesn't exist anywhere, return 404
+      if (!jobExists) {
         return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
-
-      // Check if the job belongs to the current user
-      if (job.userId !== userId) {
-        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      
+      // If job doesn't belong to user, return 403
+      if (!jobBelongsToUser) {
+        return NextResponse.json({ error: 'You do not have permission to delete this job' }, { status: 403 });
       }
-
-      console.log(`Deleting results for job ${id}`);
-      await freshPrisma.result.deleteMany({
-        where: { jobId: id },
-      });
-
-      console.log(`Deleting job ${id} from database`);
-      await freshPrisma.job.delete({
-        where: { id },
-      });
-
-      return NextResponse.json({ success: true });
-    } catch (dbError) {
-      console.error(`Database error deleting job ${id}:`, dbError);
-      return NextResponse.json({ error: 'Database error deleting job' }, { status: 500 });
+      
+      // At this point, we've verified the job exists and belongs to the user
+      console.log(`Deleting job ${id} for user ${userId}`);
+      const deleteResult = await deleteJob(id);
+      
+      if (deleteResult) {
+        return NextResponse.json({ 
+          success: true, 
+          message: 'Job deleted successfully',
+          jobId: id 
+        });
+      } else {
+        console.error(`Failed to delete job ${id}`);
+        return NextResponse.json({ 
+          error: 'Failed to delete job completely', 
+          partialSuccess: true 
+        }, { status: 500 });
+      }
+    } catch (error: any) {
+      console.error(`Error in DELETE handler for job ${id}:`, error);
+      return NextResponse.json({ 
+        error: 'Server error deleting job',
+        message: error.message || 'Unknown error'
+      }, { status: 500 });
     } finally {
       if (freshPrisma) {
         await freshPrisma.$disconnect();
       }
     }
-  } catch (error) {
-    console.error('Delete job error:', error);
-    return NextResponse.json({ error: 'Failed to delete job' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Critical error in DELETE handler:', error);
+    return NextResponse.json({ 
+      error: 'Critical server error',
+      message: error.message || 'Unknown error'
+    }, { status: 500 });
   }
 }

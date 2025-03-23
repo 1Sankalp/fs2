@@ -276,31 +276,75 @@ export async function getJobById(jobId: string) {
 export async function deleteJob(jobId: string) {
   console.log(`Attempting to delete job: ${jobId}`);
   
-  // First delete from in-memory store
-  const deletedFromMemory = hardcodedJobs.delete(jobId);
-  
-  // Then try to delete from database
   try {
-    const prisma = prismaClientSingleton();
+    // First try to delete from in-memory store
+    if (!hardcodedJobs.has(jobId)) {
+      console.log(`Job ${jobId} not found in memory store`);
+    } else {
+      const job = hardcodedJobs.get(jobId);
+      console.log(`Found job ${jobId} in memory, user: ${job?.userId}, status: ${job?.status}`);
+      const deletedFromMemory = hardcodedJobs.delete(jobId);
+      console.log(`Deleted job ${jobId} from memory: ${deletedFromMemory ? 'success' : 'failed'}`);
+    }
     
-    // First delete associated results (due to foreign key constraints)
-    await prisma.result.deleteMany({
-      where: { jobId: jobId }
-    });
-    
-    // Then delete the job
-    await prisma.job.delete({
-      where: { id: jobId }
-    });
-    
-    await prisma.$disconnect();
-    console.log(`Successfully deleted job ${jobId} from both memory and database`);
-    return true;
+    // Then try to delete from database
+    try {
+      const prisma = prismaClientSingleton();
+      
+      // First check if the job exists
+      const jobExists = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { id: true } // Only fetch the ID to minimize data transfer
+      });
+      
+      if (!jobExists) {
+        console.log(`Job ${jobId} not found in database, nothing to delete`);
+      } else {
+        // First delete associated results (due to foreign key constraints)
+        try {
+          console.log(`Deleting results for job ${jobId}...`);
+          const deleteResultsResponse = await prisma.result.deleteMany({
+            where: { jobId: jobId }
+          });
+          console.log(`Deleted ${deleteResultsResponse.count} results for job ${jobId}`);
+        } catch (resultError) {
+          console.error(`Error deleting results for job ${jobId}:`, resultError);
+          // Continue trying to delete the job even if results deletion fails
+        }
+        
+        // Then delete the job
+        try {
+          console.log(`Deleting job ${jobId} from database...`);
+          await prisma.job.delete({
+            where: { id: jobId }
+          });
+          console.log(`Successfully deleted job ${jobId} from database`);
+        } catch (jobError) {
+          console.error(`Error deleting job ${jobId} from database:`, jobError);
+          // Let the error propagate to the outer try/catch
+          throw jobError;
+        }
+      }
+      
+      await prisma.$disconnect();
+      return true;
+    } catch (dbError) {
+      console.error(`Database error while deleting job ${jobId}:`, dbError);
+      
+      // Only re-throw if the job wasn't deleted from memory
+      if (!hardcodedJobs.has(jobId)) {
+        return true; // Job at least deleted from memory
+      }
+      throw dbError;
+    }
   } catch (error) {
-    console.error(`Error deleting job ${jobId} from database:`, error);
-    
-    // Return true if at least we deleted from memory
-    return deletedFromMemory;
+    console.error(`Critical error deleting job ${jobId}:`, error);
+    // For complete safety, check memory store again and delete if still there
+    if (hardcodedJobs.has(jobId)) {
+      console.log(`Forcing memory deletion for job ${jobId} after error`);
+      hardcodedJobs.delete(jobId);
+    }
+    return false;
   }
 }
 

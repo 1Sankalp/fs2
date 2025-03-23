@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
 import ScraperForm from '../../components/ScraperForm';
-import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar, FiCheckCircle, FiInfo, FiRefreshCw, FiDownload, FiTrash2, FiSearch } from 'react-icons/fi';
+import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar, FiCheckCircle, FiInfo, FiRefreshCw, FiDownload, FiTrash2, FiSearch, FiX } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
@@ -310,6 +310,8 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
   refreshingJobs: string[]
 }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [deletingJobs, setDeletingJobs] = useState<string[]>([]);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   
   const handleRefreshJobs = async () => {
     setRefreshing(true);
@@ -341,29 +343,43 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
   const handleDeleteJob = async (jobId: string) => {
     if (confirm('Are you sure you want to delete this job?')) {
       try {
+        // Mark job as deleting
+        setDeletingJobs(prev => [...prev, jobId]);
+        setDeleteError(null);
+        
         // First delete from the server
         const response = await fetch(`/api/jobs/${jobId}`, {
           method: 'DELETE',
         });
         
         if (!response.ok) {
-          throw new Error(`Failed to delete job: ${response.status}`);
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Failed to delete job: ${response.status}`);
         }
         
         // Then update the parent component's state
         await onDelete(jobId);
         
         // Provide visual feedback without reloading the page
-        alert('Job deleted successfully');
+        console.log(`Successfully deleted job ${jobId}`);
         return jobId;
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error deleting job:', error);
-        alert('Failed to delete job. Please try again.');
+        setDeleteError(`Failed to delete job: ${error.message || 'Unknown error'}`);
+        // Don't alert, we'll show the error in the UI
         return null;
+      } finally {
+        // Remove from deleting state regardless of outcome
+        setDeletingJobs(prev => prev.filter(id => id !== jobId));
       }
     }
     return null;
   };
+  
+  // Clear delete error when jobs change
+  useEffect(() => {
+    if (deleteError) setDeleteError(null);
+  }, [jobs]);
 
   if (loading && !refreshing) {
     return (
@@ -479,6 +495,19 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
           <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
         </button>
       </div>
+      
+      {deleteError && (
+        <div className="mb-4 bg-red-50 text-red-700 p-3 rounded-md flex items-center">
+          <FiAlertCircle className="mr-2" />
+          <span>{deleteError}</span>
+          <button 
+            className="ml-auto text-red-500 hover:text-red-700" 
+            onClick={() => setDeleteError(null)}
+          >
+            <FiX />
+          </button>
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
@@ -504,18 +533,21 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
           <tbody className="bg-white divide-y divide-slate-100">
             {jobs.map((job) => {
               const isRefreshing = refreshingJobs.includes(job.id);
+              const isDeleting = deletingJobs.includes(job.id);
               
               return (
-                <tr key={job.id} className={`hover:bg-slate-50/50 transition-colors ${isRefreshing ? 'bg-slate-50/30' : ''}`}>
+                <tr key={job.id} className={`hover:bg-slate-50/50 transition-colors ${isRefreshing ? 'bg-slate-50/30' : ''} ${isDeleting ? 'opacity-50 bg-red-50/10' : ''}`}>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      {isRefreshing ? (
+                      {isDeleting ? (
+                        <FiTrash2 className="text-red-500 animate-pulse" size={16} />
+                      ) : isRefreshing ? (
                         <FiLoader className="text-blue-500 animate-spin" size={16} />
                       ) : (
                         getStatusIcon(job.status || 'pending')
                       )}
                       <span className="ml-2 text-sm text-slate-700">
-                        {isRefreshing ? 'Updating...' : getStatusText(job.status || 'pending')}
+                        {isDeleting ? 'Deleting...' : isRefreshing ? 'Updating...' : getStatusText(job.status || 'pending')}
                       </span>
                     </div>
                   </td>
@@ -541,7 +573,7 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-1.5">
                         <div 
-                          className={`h-1.5 rounded-full ${isRefreshing ? 'bg-blue-500' : 'bg-primary-600'}`}
+                          className={`h-1.5 rounded-full ${isDeleting ? 'bg-red-500' : isRefreshing ? 'bg-blue-500' : 'bg-primary-600'}`}
                           style={{ 
                             width: `${(job.totalUrls || job.totalWebsites) > 0 
                               ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
@@ -549,7 +581,7 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
                           }}
                         />
                       </div>
-                      {(job.status === 'processing' || isRefreshing) && (
+                      {(job.status === 'processing' || isRefreshing) && !isDeleting && (
                         <div className="mt-1 text-xs text-blue-600 flex items-center">
                           <FiClock className="mr-1" size={12} />
                           <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
@@ -564,12 +596,12 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
                     <div className="flex space-x-2">
                       <Link
                         href={`/dashboard/results/${job.id}`}
-                        className="text-primary-600 hover:text-primary-800"
+                        className={`text-primary-600 hover:text-primary-800 ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}
                       >
                         <FiSearch size={16} className="inline mr-1" /> View
                       </Link>
                       
-                      {job.status === 'completed' && (
+                      {job.status === 'completed' && !isDeleting && (
                         <Link
                           href={`/api/jobs/${job.id}/download`}
                           className="text-emerald-600 hover:text-emerald-800 ml-2"
@@ -580,17 +612,18 @@ const JobsList = ({ jobs, loading, error, onRefresh, onDelete, onRefreshJob, ref
                       
                       <button
                         onClick={() => handleDeleteJob(job.id)}
-                        className="text-red-600 hover:text-red-800 ml-2"
-                        disabled={isRefreshing || refreshing}
+                        className={`text-red-600 hover:text-red-800 ml-2 ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        disabled={isDeleting || isRefreshing || refreshing}
                       >
-                        <FiTrash2 size={16} className="inline mr-1" /> Delete
+                        <FiTrash2 size={16} className={`inline mr-1 ${isDeleting ? 'animate-spin' : ''}`} /> 
+                        {isDeleting ? 'Deleting...' : 'Delete'}
                       </button>
                       
-                      {job.status === 'processing' && (
+                      {job.status === 'processing' && !isDeleting && (
                         <button
                           onClick={() => handleRefreshJob(job.id)}
                           className="text-blue-600 hover:text-blue-800 ml-2"
-                          disabled={isRefreshing}
+                          disabled={isRefreshing || isDeleting}
                         >
                           <FiRefreshCw size={16} className={`inline mr-1 ${isRefreshing ? 'animate-spin' : ''}`} /> 
                           {isRefreshing ? 'Updating' : 'Update'}
