@@ -4,7 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FiLink, FiSearch, FiPlay, FiExternalLink, FiTable, FiAlertCircle, FiInfo, FiArrowRight, FiTag } from 'react-icons/fi';
 
-export default function ScraperForm() {
+interface ScraperFormProps {
+  onSuccess?: () => void;
+}
+
+export default function ScraperForm({ onSuccess }: ScraperFormProps) {
   const router = useRouter();
   const [sheetUrl, setSheetUrl] = useState('');
   const [columnName, setColumnName] = useState('');
@@ -59,41 +63,45 @@ export default function ScraperForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!sheetUrl || !columnName) {
-      setError('Please fill all required fields');
+    if (!sheetUrl || !columnName || !jobName) {
+      setError('Please fill out all required fields');
       return;
     }
-
+    
     setIsSubmitting(true);
     setError('');
-
+    
     try {
       const response = await fetch('/api/jobs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sheetUrl, 
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sheetUrl,
           columnName,
-          jobName: jobName.trim() || `${columnName} extraction` 
+          name: jobName,
         }),
       });
-
+      
       const data = await response.json();
-
+      
       if (!response.ok) {
-        throw new Error(data.message || 'Failed to start scraping job');
+        throw new Error(data.error || 'Failed to create job');
       }
-
-      // Switch to jobs tab after successful submission
-      router.refresh();
-      router.push('/dashboard?tab=jobs');
-    } catch (error) {
-      if (error instanceof Error) {
-        setError(error.message);
+      
+      console.log('Job created successfully:', data);
+      
+      // Call onSuccess callback if provided
+      if (onSuccess) {
+        onSuccess();
       } else {
-        setError('Failed to start scraping job');
+        // Default behavior if no callback provided
+        router.push(`/dashboard/results/${data.id}`);
       }
+    } catch (error) {
+      console.error('Error creating job:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create job');
     } finally {
       setIsSubmitting(false);
     }
