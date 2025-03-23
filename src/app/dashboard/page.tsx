@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
 import ScraperForm from '../../components/ScraperForm';
-import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar } from 'react-icons/fi';
+import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar, FiCheckCircle, FiInfo } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
@@ -244,39 +244,148 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
     );
   }
 
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <FiCheckCircle className="text-emerald-500" size={16} />;
+      case 'processing':
+        return <FiLoader className="text-blue-500 animate-spin" size={16} />;
+      case 'pending':
+        return <FiClock className="text-amber-500" size={16} />;
+      case 'failed':
+        return <FiAlertCircle className="text-red-500" size={16} />;
+      default:
+        return <FiInfo className="text-gray-500" size={16} />;
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'Completed';
+      case 'processing':
+        return 'Processing';
+      case 'pending':
+        return 'Pending';
+      case 'failed':
+        return 'Failed';
+      default:
+        return 'Unknown';
+    }
+  };
+
+  const getEstimatedTimeRemaining = (job: any) => {
+    if (job.status !== 'processing' || (job.processedUrls || job.processedWebsites) === 0) {
+      return null;
+    }
+    
+    // Calculate elapsed time in seconds
+    const createdAt = new Date(job.createdAt).getTime();
+    const now = new Date().getTime();
+    const elapsedSeconds = (now - createdAt) / 1000;
+    
+    // Calculate URLs per second
+    const processedCount = job.processedUrls || job.processedWebsites || 0;
+    const urlsPerSecond = processedCount / elapsedSeconds;
+    
+    // If the rate is too low, it might be an issue with processing
+    if (urlsPerSecond < 0.001) {
+      return "Calculating...";
+    }
+    
+    // Calculate remaining time in seconds
+    const totalCount = job.totalUrls || job.totalWebsites || 1;
+    const remainingUrls = totalCount - processedCount;
+    const remainingSeconds = remainingUrls / urlsPerSecond;
+    
+    // Format the remaining time
+    if (remainingSeconds < 60) {
+      return "Less than a minute";
+    } else if (remainingSeconds < 3600) {
+      const minutes = Math.round(remainingSeconds / 60);
+      return `~${minutes} minute${minutes > 1 ? 's' : ''}`;
+    } else {
+      const hours = Math.floor(remainingSeconds / 3600);
+      const minutes = Math.round((remainingSeconds % 3600) / 60);
+      return `~${hours} hour${hours > 1 ? 's' : ''} ${minutes > 0 ? `${minutes} min` : ''}`;
+    }
+  };
+
   return (
-    <div className="divide-y divide-slate-100">
-      {jobs.map((job) => (
-        <div key={job.id} className="p-4 hover:bg-slate-50 transition-colors">
-          <Link href={`/dashboard/results/${job.id}`} className="block">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="font-medium text-slate-800">{job.name || 'Unnamed Job'}</h3>
-                <div className="text-sm text-slate-500 mt-1 flex items-center">
-                  <FiCalendar className="mr-1" size={14} />
-                  <span>{new Date(job.createdAt).toLocaleDateString()}</span>
-                  <span className="mx-2">•</span>
-                  <StatusBadge status={job.status || 'pending'} />
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-slate-50">
+          <tr>
+            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Status
+            </th>
+            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Job Details
+            </th>
+            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Progress
+            </th>
+            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+              Created
+            </th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-slate-100">
+          {jobs.map((job) => (
+            <tr key={job.id} className="hover:bg-slate-50/50 transition-colors">
+              <td className="px-4 py-4 whitespace-nowrap">
+                <div className="flex items-center">
+                  {getStatusIcon(job.status || 'pending')}
+                  <span className="ml-2 text-sm text-slate-700">
+                    {getStatusText(job.status || 'pending')}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center">
-                <div className="text-right mr-4">
-                  <div className="text-sm font-medium text-slate-700">
-                    {(job.processedUrls || job.processedWebsites || 0)}/{(job.totalUrls || job.totalWebsites || 0)} processed
-                  </div>
-                  <div className="w-24 bg-slate-200 rounded-full h-2 mt-1">
-                    <div
-                      className="bg-primary-500 h-2 rounded-full"
-                      style={{ width: `${job.progress || 0}%` }}
-                    ></div>
-                  </div>
+              </td>
+              <td className="px-4 py-4">
+                <div className="flex flex-col">
+                  <Link href={`/dashboard/results/${job.id}`} className="text-sm text-slate-900 mb-1 font-medium hover:text-primary-600">
+                    {job.name || `${job.columnName} extraction`}
+                  </Link>
+                  <span className="text-xs text-slate-500">
+                    Column: {job.columnName}
+                  </span>
                 </div>
-                <FiChevronRight className="text-slate-400" />
-              </div>
-            </div>
-          </Link>
-        </div>
-      ))}
+              </td>
+              <td className="px-4 py-4 whitespace-nowrap">
+                <div className="flex flex-col space-y-1">
+                  <div className="flex justify-between text-xs text-slate-500 mb-1">
+                    <span>{(job.processedUrls || job.processedWebsites || 0)} of {(job.totalUrls || job.totalWebsites || 0)}</span>
+                    <span>
+                      {(job.totalUrls || job.totalWebsites) > 0
+                        ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                        : 0}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-200 rounded-full h-1.5">
+                    <div 
+                      className="bg-primary-600 h-1.5 rounded-full"
+                      style={{ 
+                        width: `${(job.totalUrls || job.totalWebsites) > 0 
+                          ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                          : 0}%` 
+                      }}
+                    />
+                  </div>
+                  {(job.status === 'processing') && (
+                    <div className="mt-1 text-xs text-blue-600 flex items-center">
+                      <FiClock className="mr-1" size={12} />
+                      <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
+                    </div>
+                  )}
+                </div>
+              </td>
+              <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
+                {new Date(job.createdAt).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 };
