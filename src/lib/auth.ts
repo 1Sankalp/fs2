@@ -99,8 +99,8 @@ export function getHardcodedUserId(username: string): string {
 async function authenticateUser(username: string, password: string): Promise<User | null> {
   // For demo purposes only - replace with your own authentication logic
   const hardcodedCredentials = [
-    { username: 'sankalp', password: 'password123', name: 'Sankalp Demo' },
-    { username: 'lee', password: 'password123', name: 'Lee Demo' },
+    { username: 'sankalp', password: 'funnelstrike@135', name: 'Sankalp Demo' },
+    { username: 'lee', password: 'funnelstrike@135', name: 'Lee Demo' },
   ];
   
   const matchedUser = hardcodedCredentials.find(
