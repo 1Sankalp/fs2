@@ -138,9 +138,9 @@ const syncWithDatabase = async () => {
             userId: job.userId,
             totalWebsites: job.totalUrls || 0,
             processedWebsites: job.results.length,
-            results: job.results.map(result => ({
-              website: result.website,
-              email: result.email
+            results: job.results.map(r => ({
+              website: r.website,
+              email: r.email || null
             }))
           };
           
@@ -252,7 +252,7 @@ export async function syncJobToDatabase(jobId: string) {
             data: {
               jobId: jobId,
               website: result.website,
-              email: result.email
+              email: result.email || null
             }
           });
         }
@@ -308,7 +308,7 @@ export async function loadJobsFromDatabase() {
         progress: job.progress || 0,
         results: job.results.map(r => ({
           website: r.website,
-          email: r.email
+          email: r.email || null
         })),
         createdAt: job.createdAt.toISOString(),
         updatedAt: job.updatedAt.toISOString(),
@@ -327,7 +327,7 @@ export async function loadJobsFromDatabase() {
 // Initialize with some dummy jobs for debugging if needed
 // This can be called from other files to maintain state
 export function initializeMemoryJobs() {
-  if (process.env.NODE_ENV !== 'production' && hardcodedJobs.size === 0) {
+  if (process.env.NODE_ENV !== 'production' && hardcodedJobs.size() === 0) {
     console.log("Initializing in-memory jobs map for development");
     
     // Add test jobs if needed
