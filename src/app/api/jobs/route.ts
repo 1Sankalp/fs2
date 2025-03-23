@@ -7,6 +7,7 @@ import { startEmailScraping } from '../../../lib/scraper';
 import { v4 as uuidv4 } from 'uuid';
 import { hardcodedJobs } from '../../../lib/hardcodedJobs';
 import * as cheerio from 'cheerio';
+import { hash } from 'bcrypt';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: NextRequest) {
@@ -226,6 +227,32 @@ export async function POST(request: NextRequest) {
         try {
           // Save to database first
           prisma = prismaClientSingleton();
+          
+          // First ensure that the hardcoded user exists in the database
+          const username = userId.replace('hardcoded-', '');
+          const userEmail = `${username}@example.com`;
+          
+          // Check if user exists
+          const existingUser = await prisma.user.findUnique({
+            where: { email: userEmail },
+          });
+          
+          // If user doesn't exist, create it
+          if (!existingUser) {
+            console.log(`Creating missing user in database for ${userId} with email ${userEmail}`);
+            const hashedPassword = await hash('funnelstrike@135', 10);
+            await prisma.user.create({
+              data: {
+                id: userId, // Use the hardcoded ID format
+                name: username,
+                email: userEmail,
+                password: hashedPassword,
+              },
+            });
+            console.log(`Created user ${userId} in database`);
+          }
+          
+          // Now create the job
           const dbJob = await prisma.job.create({
             data: {
               id: jobId, // Use our generated ID
