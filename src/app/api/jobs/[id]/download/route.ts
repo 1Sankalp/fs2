@@ -5,7 +5,7 @@ import { prismaClientSingleton } from '@/lib/prisma';
 import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
 // Helper function to find common/most relevant email
-export function findCommonEmail(emails: string[]): string | null {
+function findCommonEmail(emails: string[]): string | null {
   if (!emails || emails.length === 0) return null;
   if (emails.length === 1) return emails[0];
 
@@ -27,7 +27,7 @@ export function findCommonEmail(emails: string[]): string | null {
 }
 
 // Clean and group emails by domain
-export function groupAndCleanEmails(results: any[]): { [domain: string]: string[] } {
+function groupAndCleanEmails(results: any[]): { [domain: string]: string[] } {
   const emailsByDomain: { [domain: string]: string[] } = {};
   
   results.forEach(result => {
