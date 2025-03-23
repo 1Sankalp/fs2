@@ -109,16 +109,20 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
-export async function GET(
-  request: NextRequest,
-  context: { params: { id: string } }
-) {
+// Define the route parameters interface to match Next.js requirements
+interface RouteParams {
+  params: {
+    id: string;
+  };
+}
+
+export async function GET(request: NextRequest, { params }: RouteParams) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     console.log(`Download requested for job ID: ${id}`);
     
     // Check authentication
