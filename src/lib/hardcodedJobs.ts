@@ -51,15 +51,33 @@ const jobsMap = new Map<string, HardcodedJob>();
 const initializeFromStorage = () => {
   if (typeof window !== 'undefined') {
     try {
-      const storedJobs = localStorage.getItem('hardcodedJobs');
-      if (storedJobs) {
-        const parsedJobs = JSON.parse(storedJobs);
-        if (Array.isArray(parsedJobs)) {
-          console.log(`Loading ${parsedJobs.length} jobs from localStorage`);
-          parsedJobs.forEach(job => {
-            jobsMap.set(job.id, job);
-          });
+      const storedData = localStorage.getItem('hardcodedJobs');
+      if (storedData) {
+        try {
+          const parsedData = JSON.parse(storedData);
+          
+          // Handle both the new format (with timestamp) and old format (just array)
+          const parsedJobs = Array.isArray(parsedData) ? parsedData : parsedData.jobs;
+          
+          if (Array.isArray(parsedJobs)) {
+            console.log(`Loading ${parsedJobs.length} jobs from localStorage${!Array.isArray(parsedData) ? ` (saved at ${parsedData.lastSaved})` : ''}`);
+            
+            // Clear existing jobs first to avoid duplicates
+            jobsMap.clear();
+            
+            parsedJobs.forEach(job => {
+              if (job && job.id) {
+                jobsMap.set(job.id, job);
+              }
+            });
+            
+            console.log(`Successfully loaded ${jobsMap.size} jobs from localStorage`);
+          }
+        } catch (parseError) {
+          console.error('Error parsing jobs from localStorage:', parseError);
         }
+      } else {
+        console.log('No jobs found in localStorage');
       }
     } catch (error) {
       console.error('Error loading jobs from localStorage:', error);
@@ -72,8 +90,13 @@ const saveToStorage = () => {
   if (typeof window !== 'undefined') {
     try {
       const jobsArray = Array.from(jobsMap.values());
-      localStorage.setItem('hardcodedJobs', JSON.stringify(jobsArray));
-      console.log(`Saved ${jobsArray.length} jobs to localStorage`);
+      // Store with timestamp to help with troubleshooting
+      const storageData = {
+        jobs: jobsArray,
+        lastSaved: new Date().toISOString()
+      };
+      localStorage.setItem('hardcodedJobs', JSON.stringify(storageData));
+      console.log(`Saved ${jobsArray.length} jobs to localStorage at ${storageData.lastSaved}`);
     } catch (error) {
       console.error('Error saving jobs to localStorage:', error);
     }
@@ -443,10 +466,9 @@ export async function loadJobsFromDatabase() {
     initializeFromStorage();
   }
   
-  if (hardcodedJobs.size() > 0) {
-    console.log("In-memory jobs already exist, skipping database load");
-    return;
-  }
+  // Track if we have existing jobs before loading from database
+  const hasExistingJobs = hardcodedJobs.size() > 0;
+  console.log(`In-memory jobs before database load: ${hardcodedJobs.size()}`);
   
   try {
     console.log("Loading hardcoded user jobs from database");
@@ -466,17 +488,13 @@ export async function loadJobsFromDatabase() {
     
     console.log(`Found ${dbJobs.length} jobs for hardcoded users in database`);
     
-    // Add each job to the in-memory store
+    // Add each job to the in-memory store, merging with existing data if needed
     for (const job of dbJobs) {
-      console.log(`Loading job ${job.id} for user ${job.userId} with ${job.results.length} results`);
+      const jobId = job.id;
+      const existingJob = hardcodedJobs.get(jobId);
       
-      // Create properly typed results with type assertion
-      const typedResults = job.results.map(r => ({
-        website: r.website,
-        email: r.email as string | null // Use type assertion here
-      }));
-      
-      hardcodedJobs.set(job.id, {
+      // Format the database job in our expected structure
+      const formattedDbJob = {
         id: job.id,
         name: job.name || 'Unnamed Job',
         status: job.status,
@@ -485,12 +503,40 @@ export async function loadJobsFromDatabase() {
         totalWebsites: job.totalUrls,
         processedWebsites: job.results.length,
         progress: job.progress || 0,
-        results: typedResults,
+        results: job.results.map(r => ({
+          website: r.website,
+          email: r.email as string | null
+        })),
         createdAt: job.createdAt.toISOString(),
         updatedAt: job.updatedAt.toISOString(),
         userId: job.userId
-      });
+      };
+      
+      if (existingJob) {
+        // Job exists in memory - determine which is more up-to-date
+        const dbUpdatedAt = new Date(job.updatedAt);
+        const memoryUpdatedAt = new Date(existingJob.updatedAt);
+        
+        if (dbUpdatedAt > memoryUpdatedAt) {
+          // Database job is newer - use it
+          console.log(`Job ${jobId} found in both memory and database - using newer database version`);
+          hardcodedJobs.set(jobId, formattedDbJob);
+        } else {
+          // Memory job is newer or same - keep it
+          console.log(`Job ${jobId} found in both memory and database - keeping memory version`);
+        }
+      } else {
+        // Job only exists in database - add it to memory
+        console.log(`Job ${jobId} found only in database - adding to memory`);
+        hardcodedJobs.set(jobId, formattedDbJob);
+      }
     }
+    
+    // Check for jobs in memory that don't exist in database
+    const dbJobIds = new Set(dbJobs.map(job => job.id));
+    const memoryOnlyJobs = hardcodedJobs.values().filter(job => !dbJobIds.has(job.id));
+    
+    console.log(`Found ${memoryOnlyJobs.length} jobs in memory that are not in database`);
     
     // Save all loaded jobs to localStorage for client-side persistence
     if (typeof window !== 'undefined') {
@@ -498,7 +544,7 @@ export async function loadJobsFromDatabase() {
     }
     
     await prisma.$disconnect();
-    console.log(`Loaded ${hardcodedJobs.size()} jobs into memory store`);
+    console.log(`Final job count in memory store: ${hardcodedJobs.size()}`);
     logAllJobs();  // Log all loaded jobs for debugging
   } catch (error) {
     console.error("Error loading jobs from database:", error);

@@ -168,12 +168,18 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
       setError('');
       
       try {
+        console.log(`Fetching job data for ID: ${jobId}`);
         const response = await fetch(`/api/jobs/${jobId}`);
+        
         if (!response.ok) {
-          throw new Error(`Failed to load job: ${response.statusText}`);
+          const errorText = await response.text();
+          console.error(`Error response from API: ${errorText}`);
+          throw new Error(`Failed to load job: ${response.status} ${response.statusText}`);
         }
         
         const data = await response.json();
+        console.log('Job data received:', data);
+        
         if (!data.job) {
           throw new Error('Invalid job data received');
         }
@@ -193,9 +199,13 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
           setResults(data.job.results);
         } else if (data.results) {
           setResults(data.results);
+        } else {
+          console.warn('No results found in API response');
+          setResults([]);
         }
         
         console.log('Job data loaded:', normalizedJob);
+        console.log('Results loaded:', data.results?.length || data.job.results?.length || 0);
         
         // Start polling for updates if job is in progress
         if (normalizedJob.status === 'processing' || normalizedJob.status === 'pending') {

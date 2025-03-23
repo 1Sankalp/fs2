@@ -85,6 +85,13 @@ function DashboardContent() {
       }
       const data = await response.json();
       console.log('Refreshed jobs:', data);
+      
+      // Store job IDs in localStorage to track jobs across page refreshes
+      if (data.jobs && Array.isArray(data.jobs)) {
+        const jobIds = data.jobs.map((job: any) => job.id);
+        localStorage.setItem('userJobIds', JSON.stringify(jobIds));
+      }
+      
       setJobs(data.jobs || []);
       return data.jobs || [];
     } catch (error) {
@@ -105,15 +112,22 @@ function DashboardContent() {
   // Load jobs when component mounts
   useEffect(() => {
     async function loadJobs() {
+      setLoading(true);
       try {
+        // First check if we have stored job IDs from previous sessions
+        const storedJobIds = localStorage.getItem('userJobIds');
+        
         // Import and call loadJobsFromDatabase when component mounts
         const { loadJobsFromDatabase } = await import('@/lib/hardcodedJobs');
         await loadJobsFromDatabase();
         
         // Then fetch jobs from API
-        refreshJobs(); // Use the refreshJobs function to load jobs initially
+        await refreshJobs(); // Use the refreshJobs function to load jobs initially
       } catch (error) {
         console.error('Error loading jobs in dashboard:', error);
+        setError('Failed to load jobs. Please try again.');
+      } finally {
+        setLoading(false);
       }
     }
     
