@@ -81,16 +81,29 @@ export default function JobList() {
         method: 'DELETE',
       });
       
+      // Get response text first, then try to parse as JSON
+      const responseText = await response.text();
+      
+      let errorMessage = 'Failed to delete job';
+      let jsonData;
+      
+      try {
+        // Try to parse the response as JSON
+        jsonData = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse response as JSON:', responseText);
+        errorMessage = `Invalid server response: ${responseText.substring(0, 100)}`;
+      }
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to delete job');
+        throw new Error(jsonData?.message || jsonData?.error || errorMessage);
       }
       
       // Remove the job from the list
       setJobs(jobs.filter(job => job.id !== jobId));
     } catch (error) {
       console.error('Error deleting job:', error);
-      alert('Failed to delete the job. Please try again.');
+      alert(`Failed to delete the job: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setDeletingJob(null);
     }

@@ -64,12 +64,46 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
       data: { status: 'processing' }
     });
     
+    // Also update in-memory job status if it exists
+    if (hardcodedJobs.has(jobId)) {
+      const memoryJob = hardcodedJobs.get(jobId);
+      if (memoryJob) {
+        memoryJob.status = 'processing';
+        memoryJob.updatedAt = new Date().toISOString();
+        hardcodedJobs.set(jobId, memoryJob);
+      }
+    }
+    
     console.log(`Starting email scraping for job ${jobId} with ${urls.length} URLs`);
     
     // Process URLs in batches
     const batchSize = 5;
     let processedCount = 0;
     let lastSyncTime = Date.now();
+    
+    // If there are no URLs to process, mark as completed immediately
+    if (urls.length === 0) {
+      await prisma.job.update({
+        where: { id: jobId },
+        data: { 
+          status: 'completed',
+          progress: 100
+        }
+      });
+      
+      if (hardcodedJobs.has(jobId)) {
+        const memoryJob = hardcodedJobs.get(jobId);
+        if (memoryJob) {
+          memoryJob.status = 'completed';
+          memoryJob.progress = 100;
+          memoryJob.updatedAt = new Date().toISOString();
+          hardcodedJobs.set(jobId, memoryJob);
+        }
+      }
+      
+      console.log(`Job ${jobId} marked as completed (no URLs to process)`);
+      return;
+    }
     
     for (let i = 0; i < urls.length; i += batchSize) {
       const batch = urls.slice(i, i + batchSize);
@@ -156,10 +190,20 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
     }
     
     // Update job status to completed
-    await prisma.job.update({
-      where: { id: jobId },
-      data: { status: 'completed' }
-    });
+    try {
+      await prisma.job.update({
+        where: { id: jobId },
+        data: { 
+          status: 'completed',
+          progress: 100,
+          updatedAt: new Date() 
+        }
+      });
+      
+      console.log(`Job ${jobId} marked as completed in database`);
+    } catch (updateError) {
+      console.error(`Error updating job completion status in database:`, updateError);
+    }
     
     // Update in-memory job if it exists and do final sync
     if (hardcodedJobs.has(jobId)) {
@@ -170,8 +214,12 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
         memoryJob.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, memoryJob);
         
-        // Final sync to database
-        await syncJobToDatabase(jobId);
+        try {
+          await syncJobToDatabase(jobId);
+          console.log(`Final sync of completed job ${jobId} to database`);
+        } catch (syncError) {
+          console.error(`Error in final sync of job ${jobId}:`, syncError);
+        }
       }
     }
     
@@ -179,26 +227,25 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
   } catch (error) {
     console.error(`Error in email scraping job ${jobId}:`, error);
     
-    // Mark job as failed in database
+    // Mark job as failed in both DB and memory
     try {
       await prisma.job.update({
         where: { id: jobId },
-        data: { status: 'failed' }
+        data: { 
+          status: 'failed',
+          updatedAt: new Date()
+        }
       });
     } catch (updateError) {
-      console.error(`Failed to update job status for ${jobId}:`, updateError);
+      console.error(`Error updating job failure status in database:`, updateError);
     }
     
-    // Update in-memory job if it exists
     if (hardcodedJobs.has(jobId)) {
       const memoryJob = hardcodedJobs.get(jobId);
       if (memoryJob) {
         memoryJob.status = 'failed';
         memoryJob.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, memoryJob);
-        
-        // Sync failed status to database
-        await syncJobToDatabase(jobId);
       }
     }
   } finally {

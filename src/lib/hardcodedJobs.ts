@@ -276,6 +276,10 @@ export async function getJobById(jobId: string) {
 export async function deleteJob(jobId: string) {
   console.log(`Attempting to delete job: ${jobId}`);
   
+  // Track success status for both operations
+  let memoryDeleteSuccess = false;
+  let dbDeleteSuccess = false;
+  
   try {
     // First try to delete from in-memory store
     if (!hardcodedJobs.has(jobId)) {
@@ -283,8 +287,8 @@ export async function deleteJob(jobId: string) {
     } else {
       const job = hardcodedJobs.get(jobId);
       console.log(`Found job ${jobId} in memory, user: ${job?.userId}, status: ${job?.status}`);
-      const deletedFromMemory = hardcodedJobs.delete(jobId);
-      console.log(`Deleted job ${jobId} from memory: ${deletedFromMemory ? 'success' : 'failed'}`);
+      memoryDeleteSuccess = hardcodedJobs.delete(jobId);
+      console.log(`Deleted job ${jobId} from memory: ${memoryDeleteSuccess ? 'success' : 'failed'}`);
     }
     
     // Then try to delete from database
@@ -299,6 +303,8 @@ export async function deleteJob(jobId: string) {
       
       if (!jobExists) {
         console.log(`Job ${jobId} not found in database, nothing to delete`);
+        // Job not in database is not an error - could be memory-only job
+        dbDeleteSuccess = true;
       } else {
         // First delete associated results (due to foreign key constraints)
         try {
@@ -319,33 +325,30 @@ export async function deleteJob(jobId: string) {
             where: { id: jobId }
           });
           console.log(`Successfully deleted job ${jobId} from database`);
+          dbDeleteSuccess = true;
         } catch (jobError) {
           console.error(`Error deleting job ${jobId} from database:`, jobError);
-          // Let the error propagate to the outer try/catch
-          throw jobError;
+          // Log error but don't throw
+          dbDeleteSuccess = false;
         }
       }
       
       await prisma.$disconnect();
-      return true;
     } catch (dbError) {
       console.error(`Database error while deleting job ${jobId}:`, dbError);
-      
-      // Only re-throw if the job wasn't deleted from memory
-      if (!hardcodedJobs.has(jobId)) {
-        return true; // Job at least deleted from memory
-      }
-      throw dbError;
+      dbDeleteSuccess = false;
     }
   } catch (error) {
     console.error(`Critical error deleting job ${jobId}:`, error);
     // For complete safety, check memory store again and delete if still there
     if (hardcodedJobs.has(jobId)) {
       console.log(`Forcing memory deletion for job ${jobId} after error`);
-      hardcodedJobs.delete(jobId);
+      memoryDeleteSuccess = hardcodedJobs.delete(jobId);
     }
-    return false;
   }
+  
+  // Return true if at least one operation succeeded
+  return memoryDeleteSuccess || dbDeleteSuccess;
 }
 
 // Debug function to print all in-memory jobs

@@ -209,37 +209,46 @@ export async function DELETE(request: NextRequest) {
       
       // At this point, we've verified the job exists and belongs to the user
       console.log(`Deleting job ${id} for user ${userId}`);
-      const deleteResult = await deleteJob(id);
       
-      if (deleteResult) {
+      try {
+        const deleteResult = await deleteJob(id);
+        
+        if (deleteResult) {
+          return NextResponse.json({ 
+            success: true, 
+            message: 'Job deleted successfully',
+            jobId: id 
+          });
+        } else {
+          console.error(`Failed to delete job ${id}`);
+          return NextResponse.json({ 
+            error: 'Failed to delete job completely', 
+            partialSuccess: true 
+          }, { status: 500 });
+        }
+      } catch (deleteError) {
+        console.error(`Error executing deleteJob for ${id}:`, deleteError);
         return NextResponse.json({ 
-          success: true, 
-          message: 'Job deleted successfully',
-          jobId: id 
-        });
-      } else {
-        console.error(`Failed to delete job ${id}`);
-        return NextResponse.json({ 
-          error: 'Failed to delete job completely', 
-          partialSuccess: true 
+          error: 'Error deleting job',
+          message: deleteError instanceof Error ? deleteError.message : 'Unknown error'
         }, { status: 500 });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error(`Error in DELETE handler for job ${id}:`, error);
       return NextResponse.json({ 
         error: 'Server error deleting job',
-        message: error.message || 'Unknown error'
+        message: error instanceof Error ? error.message : 'Unknown error'
       }, { status: 500 });
     } finally {
       if (freshPrisma) {
         await freshPrisma.$disconnect();
       }
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error('Critical error in DELETE handler:', error);
     return NextResponse.json({ 
       error: 'Critical server error',
-      message: error.message || 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }
