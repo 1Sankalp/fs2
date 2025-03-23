@@ -4,13 +4,204 @@
 // Note: This will be reset on server restarts as it's in-memory storage
 // In production, you should use a database or persistent storage
 import { prismaClientSingleton } from './prisma';
+import { v4 as uuidv4 } from 'uuid';
 
-export const hardcodedJobs = new Map<string, any>();
+interface HardcodedJob {
+  id: string;
+  name: string;
+  status: string;
+  sheetUrl: string;
+  columnName: string;
+  createdAt: string;
+  updatedAt: string;
+  totalWebsites?: number;
+  processedWebsites?: number;
+  userId: string;
+  results: { website: string; email: string | null }[];
+}
+
+// Type for database job with results
+interface DbJobWithResults {
+  id: string;
+  name: string | null;
+  status: string;
+  sheetUrl: string;
+  columnName: string;
+  createdAt: Date;
+  updatedAt: Date;
+  userId: string;
+  totalUrls: number | null;
+  results: Array<{
+    website: string;
+    email: string | null;
+  }>;
+}
+
+// In-memory job storage
+const jobsMap = new Map<string, HardcodedJob>();
+
+// Initialize from localStorage on startup if available (client-side only)
+const initializeFromStorage = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      const storedJobs = localStorage.getItem('hardcodedJobs');
+      if (storedJobs) {
+        const parsedJobs = JSON.parse(storedJobs);
+        if (Array.isArray(parsedJobs)) {
+          console.log(`Loading ${parsedJobs.length} jobs from localStorage`);
+          parsedJobs.forEach(job => {
+            jobsMap.set(job.id, job);
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error loading jobs from localStorage:', error);
+    }
+  }
+};
+
+// Save to localStorage
+const saveToStorage = () => {
+  if (typeof window !== 'undefined') {
+    try {
+      const jobsArray = Array.from(jobsMap.values());
+      localStorage.setItem('hardcodedJobs', JSON.stringify(jobsArray));
+      console.log(`Saved ${jobsArray.length} jobs to localStorage`);
+    } catch (error) {
+      console.error('Error saving jobs to localStorage:', error);
+    }
+  }
+};
+
+// Sync with database
+const syncWithDatabase = async () => {
+  if (typeof window !== 'undefined') {
+    try {
+      // Only run for hardcoded users
+      const storedUserId = window.localStorage.getItem('hardcodedUserId');
+      if (!storedUserId) {
+        console.log('Not a hardcoded user, skipping database sync');
+        return;
+      }
+      
+      const userId = storedUserId;
+      console.log(`Syncing jobs for hardcoded user ${userId} with database`);
+      
+      const prisma = prismaClientSingleton();
+      
+      // Get jobs from database
+      const dbJobs = await prisma.job.findMany({
+        where: { 
+          userId: userId 
+        },
+        include: {
+          results: true
+        }
+      });
+      
+      console.log(`Found ${dbJobs.length} jobs in database for user ${userId}`);
+      
+      // Update in-memory store with database jobs
+      dbJobs.forEach((dbJob) => {
+        // Safely cast to our expected type
+        const job = dbJob as unknown as DbJobWithResults;
+        
+        if (jobsMap.has(job.id)) {
+          // Update existing job
+          const memoryJob = jobsMap.get(job.id);
+          if (memoryJob) {
+            memoryJob.status = job.status;
+            memoryJob.updatedAt = job.updatedAt.toISOString();
+            
+            // Update results
+            const formattedResults = job.results.map(result => ({
+              website: result.website,
+              email: result.email
+            }));
+            
+            memoryJob.results = formattedResults;
+            memoryJob.processedWebsites = formattedResults.length;
+            
+            jobsMap.set(job.id, memoryJob);
+          }
+        } else {
+          // Add new job from database
+          const newJob: HardcodedJob = {
+            id: job.id,
+            name: job.name || 'Untitled Job',
+            status: job.status,
+            sheetUrl: job.sheetUrl,
+            columnName: job.columnName,
+            createdAt: job.createdAt.toISOString(),
+            updatedAt: job.updatedAt.toISOString(),
+            userId: job.userId,
+            totalWebsites: job.totalUrls || 0,
+            processedWebsites: job.results.length,
+            results: job.results.map(result => ({
+              website: result.website,
+              email: result.email
+            }))
+          };
+          
+          jobsMap.set(job.id, newJob);
+        }
+      });
+      
+      // Save updated jobs to localStorage
+      saveToStorage();
+      
+      await prisma.$disconnect();
+    } catch (error) {
+      console.error('Error syncing with database:', error);
+    }
+  }
+};
+
+// Set user in localStorage
+export const setCurrentUser = (userId: string) => {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('hardcodedUserId', userId);
+    console.log(`Set current hardcoded user to ${userId} in localStorage`);
+    
+    // Sync with database when user changes
+    syncWithDatabase();
+  }
+};
+
+// Call on app initialization
+export const initializeHardcodedJobs = () => {
+  initializeFromStorage();
+  syncWithDatabase();
+};
+
+export const hardcodedJobs = {
+  set: (id: string, job: HardcodedJob) => {
+    jobsMap.set(id, job);
+    saveToStorage();
+  },
+  get: (id: string) => jobsMap.get(id),
+  has: (id: string) => jobsMap.has(id),
+  delete: (id: string) => {
+    const result = jobsMap.delete(id);
+    saveToStorage();
+    return result;
+  },
+  clear: () => {
+    jobsMap.clear();
+    saveToStorage();
+  },
+  values: () => Array.from(jobsMap.values()),
+  getJobsForUser: (userId: string) => {
+    return Array.from(jobsMap.values()).filter(job => job.userId === userId);
+  },
+  generateJobId: () => uuidv4(),
+  size: () => jobsMap.size
+};
 
 // Debug function to print all in-memory jobs
 export function logAllJobs() {
   console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size}`);
-  hardcodedJobs.forEach((job, id) => {
+  hardcodedJobs.values().forEach((job, id) => {
     console.log(`Memory job: ${id} - User: ${job.userId} - Status: ${job.status} - Created: ${job.createdAt}`);
   });
 }

@@ -12,6 +12,13 @@ const USERS = [
   { username: "sankalp", password: "funnelstrike@135" }
 ];
 
+// Add the User interface
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
 // Function to initialize predefined users with retry logic
 export async function ensureUsersExist() {
   // Use a fresh Prisma client to avoid prepared statement issues
@@ -88,22 +95,43 @@ export function getHardcodedUserId(username: string): string {
   return `hardcoded-${username.toLowerCase()}`;
 }
 
-// Update the authenticateUser function to use consistent user IDs
-async function authenticateUser(email: string, password: string) {
-  // Check against our hardcoded users first (faster and avoids DB)
-  const username = email.includes('@') ? email.split('@')[0] : email;
+// Update hardcoded users authentication to store userId in localStorage
+async function authenticateUser(username: string, password: string): Promise<User | null> {
+  // For demo purposes only - replace with your own authentication logic
+  const hardcodedCredentials = [
+    { username: 'sankalp', password: 'password123', name: 'Sankalp Demo' },
+    { username: 'lee', password: 'password123', name: 'Lee Demo' },
+  ];
   
-  const hardcodedUser = USERS.find(u => u.username === username);
-  if (hardcodedUser && hardcodedUser.password === password) {
-    // Return a user object that matches our database format
+  const matchedUser = hardcodedCredentials.find(
+    cred => cred.username === username && cred.password === password
+  );
+  
+  if (matchedUser) {
+    // Hardcoded user ID format to ensure consistency
+    const userId = `hardcoded-${matchedUser.username}`;
+    
+    // Store in localStorage for persistence between page refreshes
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('hardcodedUserId', userId);
+      console.log(`Stored hardcoded user ID in localStorage: ${userId}`);
+      
+      // Import and call setCurrentUser if possible
+      try {
+        const { setCurrentUser } = await import('./hardcodedJobs');
+        setCurrentUser(userId);
+      } catch (error) {
+        console.error('Error setting current user:', error);
+      }
+    }
+    
     return {
-      id: getHardcodedUserId(username),
-      email: `${username}@example.com`,
-      name: username
+      id: userId,
+      name: matchedUser.name,
+      email: `${matchedUser.username}@example.com`,
     };
   }
   
-  // If not a hardcoded user, return null
   return null;
 }
 
