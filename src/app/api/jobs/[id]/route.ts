@@ -18,7 +18,7 @@ export async function GET(
   let freshPrisma = null;
 
   try {
-    const jobId = context.params.id;
+    const jobId = params.id;
 
     if (!jobId) {
       return NextResponse.json({ error: 'Job ID is required' }, { status: 400 });
@@ -197,7 +197,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: PageParams }
+  { params }: { params: { id: string } }
 ) {
   let freshPrisma = null;
 
