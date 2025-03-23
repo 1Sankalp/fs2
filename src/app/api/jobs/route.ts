@@ -59,16 +59,19 @@ export async function GET(request: NextRequest) {
       
       console.log(`Found ${memoryJobs.length} in-memory jobs for user ${userId}`);
       
-      // Try to get database jobs as well
+      // Try to get database jobs as well - create a fresh client for each user request
       let dbJobs: any[] = [];
       try {
-        // Create a fresh Prisma client for database access
+        // Create a completely fresh Prisma client for each hardcoded user
         prisma = prismaClientSingleton();
+        console.log(`Created fresh database connection for user ${userId}`);
         
-        // Fetch jobs from database
+        // Fetch jobs from database with explicit userId filter
         dbJobs = await prisma.job.findMany({
           where: {
-            userId: userId,
+            userId: {
+              equals: userId
+            }
           },
           orderBy: {
             createdAt: 'desc',
@@ -83,7 +86,13 @@ export async function GET(request: NextRequest) {
         }
       } catch (dbError) {
         console.error(`Database query error for hardcoded user ${userId}:`, dbError);
-        // Continue with just memory jobs, don't fail the request
+        // Proceed with memory jobs only
+      } finally {
+        // Always disconnect the client to prevent connection pool issues
+        if (prisma) {
+          await prisma.$disconnect();
+          prisma = null;
+        }
       }
       
       // Combine database and memory jobs, prioritizing memory jobs for same IDs

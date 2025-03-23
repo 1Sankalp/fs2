@@ -53,7 +53,7 @@ function groupAndCleanEmails(results: any[]): { [domain: string]: string[] } {
 }
 
 export async function GET(request: NextRequest) {
-  const freshPrisma = prismaClientSingleton();
+  let freshPrisma = null;
 
   try {
     // Extract job ID from request URL
@@ -100,28 +100,46 @@ export async function GET(request: NextRequest) {
     if (results.length === 0 || !userId.startsWith('hardcoded-')) {
       console.log(`Fetching job ${id} results from database`);
       
-      // Get job from database
-      const job = await freshPrisma.job.findUnique({
-        where: { id },
-        include: {
-          results: true,
-        },
-      });
+      try {
+        // Create fresh client to avoid prepared statement conflicts
+        freshPrisma = prismaClientSingleton();
+        
+        // Get job from database
+        const job = await freshPrisma.job.findUnique({
+          where: { id },
+          include: {
+            results: true,
+          },
+        });
 
-      if (!job) {
-        console.log(`Job ${id} not found in database`);
-        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+        if (!job) {
+          console.log(`Job ${id} not found in database`);
+          return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+        }
+
+        // Check if the job belongs to the current user
+        if (job.userId !== userId) {
+          console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+
+        jobName = job.name || 'job-export';
+        results = job.results;
+        console.log(`Found database job ${id} with ${results.length} results`);
+      } catch (dbError) {
+        console.error(`Database error fetching job ${id} results:`, dbError);
+        
+        // If we already have memory results, continue with those
+        if (results.length > 0) {
+          console.log(`Proceeding with ${results.length} memory results despite database error`);
+        } else {
+          return NextResponse.json({ error: 'Database error fetching job results' }, { status: 500 });
+        }
+      } finally {
+        if (freshPrisma) {
+          await freshPrisma.$disconnect();
+        }
       }
-
-      // Check if the job belongs to the current user
-      if (job.userId !== userId) {
-        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-      }
-
-      jobName = job.name || 'job-export';
-      results = job.results;
-      console.log(`Found database job ${id} with ${results.length} results`);
     }
 
     // Convert results to CSV
@@ -181,7 +199,5 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error generating CSV:', error);
     return NextResponse.json({ error: 'Failed to generate CSV' }, { status: 500 });
-  } finally {
-    await freshPrisma.$disconnect();
   }
 }

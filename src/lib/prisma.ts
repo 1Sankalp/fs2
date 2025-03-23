@@ -1,31 +1,40 @@
 import { PrismaClient } from '@prisma/client';
 
-// Create a new client with completely disabled connection pooling
-export const prismaClientSingleton = () => {
-  // Force use of direct URL without pooling and no statement caching
-  let url = process.env.DATABASE_URL;
+// Add global declaration for PrismaClient instances
+declare global {
+  var prisma: PrismaClient | undefined;
+}
+
+// Connection counter to track when clients are created
+let connectionCounter = 0;
+
+/**
+ * This creates a fresh PrismaClient instance each time it's called.
+ * Each instance has a unique query engine to avoid prepared statement conflicts.
+ * Use this when you need a completely isolated client for a specific operation.
+ */
+export function prismaClientSingleton() {
+  const connectionId = ++connectionCounter;
+  console.log(`Creating new Prisma client instance #${connectionId}`);
   
-  // Ensure we're using a direct URL, not a pooled one
-  if (url?.includes('pgbouncer=true')) {
-    url = url.replace('pgbouncer=true', 'pgbouncer=false');
-  }
+  // Add a statement cache size of 0 and a unique identifier to avoid statement conflicts
+  const url = process.env.DATABASE_URL || '';
+  const uniqueUrl = url.includes('?') 
+    ? `${url}&connection_limit=1&pool_timeout=0&statement_cache_size=0&connection_id=${connectionId}`
+    : `${url}?connection_limit=1&pool_timeout=0&statement_cache_size=0&connection_id=${connectionId}`;
   
-  // Add non-pooling parameters
-  url = url + 
-    "?connection_limit=1" + 
-    "&pool_timeout=0" +
-    "&statement_cache_size=0" +
-    "&connect_timeout=30";
-    
   return new PrismaClient({
-    log: ['error', 'warn'],
-    datasourceUrl: url,
+    datasourceUrl: uniqueUrl,
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   });
-};
+}
 
-// Always use a fresh client, never a shared one
-export const prisma = prismaClientSingleton();
+/**
+ * Global shared instance - only use this for read-only operations!
+ * For write operations or anything that needs to be reliable, use prismaClientSingleton()
+ */
+export const prisma = global.prisma || (global.prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+}));
 
-// Avoid modifying global object entirely
-const globalForPrisma = global as unknown as { prisma: undefined };
-globalForPrisma.prisma = undefined; 
+if (process.env.NODE_ENV !== 'production') global.prisma = prisma; 

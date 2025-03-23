@@ -5,7 +5,7 @@ import { prismaClientSingleton } from '@/lib/prisma';
 import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
 export async function GET(request: NextRequest) {
-  const freshPrisma = prismaClientSingleton();
+  let freshPrisma = null;
 
   try {
     // Extract job ID from request URL
@@ -66,54 +66,63 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // If we get here, we need to check the database
+    // If we get here, we need to check the database with a fresh client
     console.log(`Fetching job ${id} from database for user ${userId}`);
-    const job = await freshPrisma.job.findUnique({
-      where: { id },
-      include: {
-        results: { orderBy: { createdAt: 'asc' } },
-      },
-    });
+    try {
+      freshPrisma = prismaClientSingleton();
+      
+      const job = await freshPrisma.job.findUnique({
+        where: { id },
+        include: {
+          results: { orderBy: { createdAt: 'asc' } },
+        },
+      });
 
-    if (!job) {
-      console.log(`Job ${id} not found in database`);
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      if (!job) {
+        console.log(`Job ${id} not found in database`);
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
+
+      // Check if the job belongs to the current user
+      if (job.userId !== userId) {
+        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      }
+
+      console.log(`Successfully found job ${id} for user ${userId} in database`);
+      const totalWebsites = job.totalUrls || 0;
+      const processedWebsites = job.results.length;
+      const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
+
+      // Format the response to match what the frontend expects
+      return NextResponse.json({
+        job: {
+          ...job,
+          progress,
+          totalUrls: totalWebsites,
+          processedUrls: processedWebsites,
+        },
+        results: job.results.map(result => ({
+          website: result.website,
+          email: result.email
+        }))
+      });
+    } catch (dbError) {
+      console.error(`Database error fetching job ${id}:`, dbError);
+      return NextResponse.json({ error: 'Database error fetching job' }, { status: 500 });
+    } finally {
+      if (freshPrisma) {
+        await freshPrisma.$disconnect();
+      }
     }
-
-    // Check if the job belongs to the current user
-    if (job.userId !== userId) {
-      console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
-
-    console.log(`Successfully found job ${id} for user ${userId} in database`);
-    const totalWebsites = job.totalUrls || 0;
-    const processedWebsites = job.results.length;
-    const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
-
-    // Format the response to match what the frontend expects
-    return NextResponse.json({
-      job: {
-        ...job,
-        progress,
-        totalUrls: totalWebsites,
-        processedUrls: processedWebsites,
-      },
-      results: job.results.map(result => ({
-        website: result.website,
-        email: result.email
-      }))
-    });
   } catch (error) {
     console.error('Get job error:', error);
     return NextResponse.json({ error: 'Failed to get job' }, { status: 500 });
-  } finally {
-    await freshPrisma.$disconnect();
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  const freshPrisma = prismaClientSingleton();
+  let freshPrisma = null;
 
   try {
     // Extract job ID from request URL
@@ -150,6 +159,38 @@ export async function DELETE(request: NextRequest) {
         
         console.log(`Deleting job ${id} from memory store`);
         hardcodedJobs.delete(id);
+        
+        // Also try to delete from database if it exists there
+        try {
+          freshPrisma = prismaClientSingleton();
+          
+          // Check if job exists in database
+          const dbJob = await freshPrisma.job.findUnique({
+            where: { id },
+          });
+          
+          if (dbJob && dbJob.userId === userId) {
+            // Delete results first
+            await freshPrisma.result.deleteMany({
+              where: { jobId: id },
+            });
+            
+            // Then delete the job
+            await freshPrisma.job.delete({
+              where: { id },
+            });
+            console.log(`Also deleted job ${id} from database`);
+          }
+        } catch (dbError) {
+          // Log but don't fail if database deletion fails
+          console.error(`Failed to delete job ${id} from database:`, dbError);
+        } finally {
+          if (freshPrisma) {
+            await freshPrisma.$disconnect();
+            freshPrisma = null;
+          }
+        }
+        
         return NextResponse.json({ success: true });
       } else {
         console.log(`Job ${id} not found in memory store for user ${userId}`);
@@ -158,36 +199,46 @@ export async function DELETE(request: NextRequest) {
 
     // If we get here, we need to check the database
     console.log(`Attempting to delete job ${id} from database for user ${userId}`);
-    const job = await freshPrisma.job.findUnique({
-      where: { id },
-    });
+    
+    try {
+      freshPrisma = prismaClientSingleton();
+      
+      const job = await freshPrisma.job.findUnique({
+        where: { id },
+      });
 
-    if (!job) {
-      console.log(`Job ${id} not found in database`);
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      if (!job) {
+        console.log(`Job ${id} not found in database`);
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      }
+
+      // Check if the job belongs to the current user
+      if (job.userId !== userId) {
+        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+      }
+
+      console.log(`Deleting results for job ${id}`);
+      await freshPrisma.result.deleteMany({
+        where: { jobId: id },
+      });
+
+      console.log(`Deleting job ${id} from database`);
+      await freshPrisma.job.delete({
+        where: { id },
+      });
+
+      return NextResponse.json({ success: true });
+    } catch (dbError) {
+      console.error(`Database error deleting job ${id}:`, dbError);
+      return NextResponse.json({ error: 'Database error deleting job' }, { status: 500 });
+    } finally {
+      if (freshPrisma) {
+        await freshPrisma.$disconnect();
+      }
     }
-
-    // Check if the job belongs to the current user
-    if (job.userId !== userId) {
-      console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
-
-    console.log(`Deleting results for job ${id}`);
-    await freshPrisma.result.deleteMany({
-      where: { jobId: id },
-    });
-
-    console.log(`Deleting job ${id} from database`);
-    await freshPrisma.job.delete({
-      where: { id },
-    });
-
-    return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Delete job error:', error);
     return NextResponse.json({ error: 'Failed to delete job' }, { status: 500 });
-  } finally {
-    await freshPrisma.$disconnect();
   }
 }
