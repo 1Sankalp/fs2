@@ -201,9 +201,9 @@ export const hardcodedJobs = {
 
 // Debug function to print all in-memory jobs
 export function logAllJobs() {
-  console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size}`);
-  hardcodedJobs.values().forEach((job, id) => {
-    console.log(`Memory job: ${id} - User: ${job.userId} - Status: ${job.status} - Created: ${job.createdAt}`);
+  console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size()}`);
+  hardcodedJobs.values().forEach((job) => {
+    console.log(`Memory job: ${job.id} - User: ${job.userId} - Status: ${job.status} - Created: ${job.createdAt}`);
   });
 }
 
@@ -270,7 +270,7 @@ export async function syncJobToDatabase(jobId: string) {
 // Initialize hardcoded jobs from database on startup
 // This helps restore state after server restarts
 export async function loadJobsFromDatabase() {
-  if (hardcodedJobs.size > 0) {
+  if (hardcodedJobs.size() > 0) {
     console.log("In-memory jobs already exist, skipping database load");
     return;
   }

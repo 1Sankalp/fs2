@@ -466,8 +466,10 @@ async function processJob(jobId: string, urls: string[]) {
         });
         
         // Update progress
-        job.processedWebsites++;
-        job.progress = Math.round((job.processedWebsites / job.totalWebsites) * 100);
+        job.processedWebsites = (job.processedWebsites || 0) + 1;
+        const processedCount = job.processedWebsites || 0;
+        const totalCount = job.totalWebsites || 1;
+        job.progress = Math.round((processedCount / totalCount) * 100);
         job.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, { ...job });
         
@@ -482,8 +484,10 @@ async function processJob(jobId: string, urls: string[]) {
         });
         
         // Still update progress
-        job.processedWebsites++;
-        job.progress = Math.round((job.processedWebsites / job.totalWebsites) * 100);
+        job.processedWebsites = (job.processedWebsites || 0) + 1;
+        const processedCount = job.processedWebsites || 0;
+        const totalCount = job.totalWebsites || 1;
+        job.progress = Math.round((processedCount / totalCount) * 100);
         job.updatedAt = new Date().toISOString();
         hardcodedJobs.set(jobId, { ...job });
       }
