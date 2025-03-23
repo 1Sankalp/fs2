@@ -16,21 +16,29 @@ export async function GET(request: NextRequest) {
     // Check authentication first, before creating any DB connections
     const session = await getServerSession(authOptions);
     if (!session) {
+      console.log('GET /api/jobs - No session found - user not authenticated');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Get user ID
     const userId = session.user.id;
-    console.log(`Getting jobs for user ID: ${userId}`);
+    console.log(`GET /api/jobs - User ID from session: ${userId}`);
+    
+    // Print info about in-memory jobs for debugging
+    console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size}`);
+    hardcodedJobs.forEach((job, id) => {
+      console.log(`Memory job: ${id} - User: ${job.userId} - Status: ${job.status}`);
+    });
     
     // For hardcoded users, try to access the database but also include in-memory jobs
     if (userId.startsWith('hardcoded-')) {
-      console.log('Getting jobs for hardcoded user from memory and DB:', userId);
+      console.log(`GET /api/jobs - Getting jobs for hardcoded user from memory and DB: ${userId}`);
       
       // Get all jobs for this user from the in-memory store
       const memoryJobs: any[] = [];
       hardcodedJobs.forEach((job, key) => {
         if (job.userId === userId) {
+          console.log(`Found in-memory job ${key} for user ${userId}`);
           memoryJobs.push({
             id: job.id,
             name: job.name,
@@ -46,6 +54,8 @@ export async function GET(request: NextRequest) {
           });
         }
       });
+      
+      console.log(`Found ${memoryJobs.length} in-memory jobs for user ${userId}`);
       
       // Try to get database jobs as well
       let dbJobs: any[] = [];
@@ -63,8 +73,14 @@ export async function GET(request: NextRequest) {
           },
         });
         
+        console.log(`Found ${dbJobs.length} database jobs for user ${userId}`);
+        if (dbJobs.length > 0) {
+          dbJobs.forEach(job => {
+            console.log(`DB job: ${job.id} - Status: ${job.status}`);
+          });
+        }
       } catch (dbError) {
-        console.error('Database query error for hardcoded user:', dbError);
+        console.error(`Database query error for hardcoded user ${userId}:`, dbError);
         // Continue with just memory jobs, don't fail the request
       }
       
@@ -85,11 +101,12 @@ export async function GET(request: NextRequest) {
         return dateB - dateA;
       });
       
+      console.log(`Returning ${allJobs.length} combined jobs for user ${userId}`);
       return NextResponse.json({ jobs: allJobs });
     }
     
     // For real users, create a fresh client for database access
-    console.log('Fetching jobs from database for user:', userId);
+    console.log(`GET /api/jobs - Fetching jobs from database for user: ${userId}`);
     prisma = prismaClientSingleton();
     
     // Fetch jobs from database
@@ -102,6 +119,7 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    console.log(`Found ${jobs.length} database jobs for user ${userId}`);
     return NextResponse.json({ jobs });
   } catch (error) {
     console.error('Get jobs error:', error);

@@ -20,30 +20,45 @@ export async function GET(request: NextRequest) {
 
     const session = await getServerSession(authOptions);
     if (!session) {
+      console.log('No session found - user not authenticated');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const userId = session.user.id;
-    console.log(`User ID: ${userId}`);
+    console.log(`User ID from session: ${userId}`);
 
-    if (userId.startsWith('hardcoded-') && hardcodedJobs.has(id)) {
-      console.log(`Found job ${id} in memory store`);
-      const job = hardcodedJobs.get(id);
+    // Check for hardcoded users first
+    if (userId.startsWith('hardcoded-')) {
+      console.log(`User is hardcoded, checking memory store for job ${id}`);
+      
+      if (hardcodedJobs.has(id)) {
+        console.log(`Found job ${id} in memory store`);
+        const job = hardcodedJobs.get(id);
+        
+        // Check if this job belongs to this user
+        if (job.userId !== userId) {
+          console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
 
-      return NextResponse.json({
-        id: job.id,
-        name: job.name,
-        status: job.status,
-        createdAt: job.createdAt,
-        updatedAt: job.updatedAt,
-        progress: job.progress || 0,
-        totalWebsites: job.totalWebsites || 0,
-        processedWebsites: job.processedWebsites || 0,
-        results: job.results || []
-      });
+        return NextResponse.json({
+          id: job.id,
+          name: job.name,
+          status: job.status,
+          createdAt: job.createdAt,
+          updatedAt: job.updatedAt,
+          progress: job.progress || 0,
+          totalWebsites: job.totalWebsites || 0,
+          processedWebsites: job.processedWebsites || 0,
+          results: job.results || []
+        });
+      } else {
+        console.log(`Job ${id} not found in memory store for user ${userId}`);
+      }
     }
 
-    console.log(`Fetching job ${id} from database`);
+    // If we get here, we need to check the database
+    console.log(`Fetching job ${id} from database for user ${userId}`);
     const job = await freshPrisma.job.findUnique({
       where: { id },
       include: {
@@ -52,13 +67,17 @@ export async function GET(request: NextRequest) {
     });
 
     if (!job) {
+      console.log(`Job ${id} not found in database`);
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
+    // Check if the job belongs to the current user
     if (job.userId !== userId) {
+      console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
+    console.log(`Successfully found job ${id} for user ${userId} in database`);
     const totalWebsites = job.totalUrls || 0;
     const processedWebsites = job.results.length;
     const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
@@ -93,35 +112,57 @@ export async function DELETE(request: NextRequest) {
 
     const session = await getServerSession(authOptions);
     if (!session) {
+      console.log('No session found - user not authenticated');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const userId = session.user.id;
-    console.log(`User ID: ${userId}`);
+    console.log(`User ID from session: ${userId}`);
 
-    if (userId.startsWith('hardcoded-') && hardcodedJobs.has(id)) {
-      console.log(`Deleting job ${id} from memory store`);
-      hardcodedJobs.delete(id);
-      return NextResponse.json({ success: true });
+    // Check for hardcoded users first
+    if (userId.startsWith('hardcoded-')) {
+      console.log(`User is hardcoded, checking memory store for job ${id}`);
+      
+      if (hardcodedJobs.has(id)) {
+        const job = hardcodedJobs.get(id);
+        
+        // Check if this job belongs to this user
+        if (job.userId !== userId) {
+          console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+          return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+        }
+        
+        console.log(`Deleting job ${id} from memory store`);
+        hardcodedJobs.delete(id);
+        return NextResponse.json({ success: true });
+      } else {
+        console.log(`Job ${id} not found in memory store for user ${userId}`);
+      }
     }
 
-    console.log(`Attempting to delete job ${id} from database`);
+    // If we get here, we need to check the database
+    console.log(`Attempting to delete job ${id} from database for user ${userId}`);
     const job = await freshPrisma.job.findUnique({
       where: { id },
     });
 
     if (!job) {
+      console.log(`Job ${id} not found in database`);
       return NextResponse.json({ error: 'Job not found' }, { status: 404 });
     }
 
+    // Check if the job belongs to the current user
     if (job.userId !== userId) {
+      console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
 
+    console.log(`Deleting results for job ${id}`);
     await freshPrisma.result.deleteMany({
       where: { jobId: id },
     });
 
+    console.log(`Deleting job ${id} from database`);
     await freshPrisma.job.delete({
       where: { id },
     });
