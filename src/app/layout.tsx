@@ -1,7 +1,9 @@
-import { Inter } from 'next/font/google';
-import type { Metadata } from 'next';
-import './globals.css';
-import { AuthProvider } from '../components/AuthProvider';
+import type { Metadata } from "next";
+import { Inter } from "next/font/google";
+import "./globals.css";
+import { AuthProvider } from "@/components/AuthProvider";
+import { ensureUsersExist } from "@/lib/auth";
+import { loadJobsFromDatabase } from "@/lib/hardcodedJobs";
 
 const inter = Inter({ 
   subsets: ['latin'],
@@ -18,6 +20,28 @@ export const metadata: Metadata = {
   themeColor: '#4652f0',
   colorScheme: 'light',
 };
+
+// Initialize users and jobs on server startup
+try {
+  if (typeof window === 'undefined') {
+    console.log('Server-side initialization');
+    // Create hardcoded users if they don't exist
+    ensureUsersExist()
+      .then(() => {
+        console.log('User initialization complete');
+        // Load jobs for hardcoded users from database
+        return loadJobsFromDatabase();
+      })
+      .then(() => {
+        console.log('Job initialization complete');
+      })
+      .catch(error => {
+        console.error('Initialization error:', error);
+      });
+  }
+} catch (error) {
+  console.error('Top-level initialization error:', error);
+}
 
 export default function RootLayout({
   children,

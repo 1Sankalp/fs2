@@ -1,216 +1,187 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
 import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
-// Function to find common email from set of similar emails
-const findCommonEmail = (emails: string[]): string => {
-  if (!emails || emails.length === 0) return '';
+// Helper function to find common/most relevant email
+export function findCommonEmail(emails: string[]): string | null {
+  if (!emails || emails.length === 0) return null;
   if (emails.length === 1) return emails[0];
 
-  // Sort emails by length (shortest first)
-  const sortedEmails = [...emails].sort((a, b) => a.length - b.length);
-  const shortestEmail = sortedEmails[0];
+  // First try to find emails with common patterns
+  const priorityEmails = emails.filter(email => {
+    const lowerEmail = email.toLowerCase();
+    return lowerEmail.includes('contact') || 
+           lowerEmail.includes('info') || 
+           lowerEmail.includes('hello') || 
+           lowerEmail.includes('support');
+  });
   
-  // Check if all other emails contain the shortest one
-  if (sortedEmails.every(email => email.endsWith(shortestEmail))) {
-    return shortestEmail;
+  if (priorityEmails.length > 0) {
+    return priorityEmails[0];
   }
   
-  // Try to find the common suffix (domain part)
-  const domains = emails.map(email => {
-    const atIndex = email.indexOf('@');
-    return atIndex >= 0 ? email.substring(atIndex) : email;
-  });
-  
-  const commonDomain = domains.reduce((common, domain) => {
-    if (!common) return domain;
-    // Find the longest common ending between current common and this domain
-    let i = 1;
-    while (i <= Math.min(common.length, domain.length) && 
-           common.slice(-i) === domain.slice(-i)) {
-      i++;
-    }
-    return common.slice(-i + 1);
-  }, '');
-  
-  // Find username parts that are common or contained in others
-  const usernames = emails.map(email => {
-    const atIndex = email.indexOf('@');
-    return atIndex >= 0 ? email.substring(0, atIndex) : '';
-  });
-  
-  // For simplicity, find the shortest username that is contained in all others
-  const sortedByUsernameLength = [...emails].sort((a, b) => {
-    const aUsername = a.split('@')[0] || '';
-    const bUsername = b.split('@')[0] || '';
-    return aUsername.length - bUsername.length;
-  });
-  
-  // Try each email, shortest username first
-  for (const email of sortedByUsernameLength) {
-    const [username, domain] = email.split('@');
-    if (domain && domain.endsWith(commonDomain.slice(1)) && 
-        sortedByUsernameLength.every(e => 
-          e === email || e.includes(username + '@')
-        )) {
-      return email;
-    }
-  }
-  
-  // If no clear pattern, return the shortest email
-  return shortestEmail;
-};
+  // If no priority emails, return the first one
+  return emails[0];
+}
 
-// Group similar emails by domain
-const groupAndCleanEmails = (results: { website: string, email: string | null }[]): { website: string, email: string | null }[] => {
-  if (!results || results.length === 0) return [];
-  
-  // Group by website
-  const websiteGroups: Record<string, string[]> = {};
+// Clean and group emails by domain
+export function groupAndCleanEmails(results: any[]): { [domain: string]: string[] } {
+  const emailsByDomain: { [domain: string]: string[] } = {};
   
   results.forEach(result => {
     if (result.email) {
-      if (!websiteGroups[result.website]) {
-        websiteGroups[result.website] = [];
+      // Extract domain from email
+      const emailParts = result.email.split('@');
+      if (emailParts.length !== 2) return;
+      
+      const domain = emailParts[1].toLowerCase();
+      
+      if (!emailsByDomain[domain]) {
+        emailsByDomain[domain] = [];
       }
-      websiteGroups[result.website].push(result.email);
+      
+      // Add email if not already in the list
+      if (!emailsByDomain[domain].includes(result.email)) {
+        emailsByDomain[domain].push(result.email);
+      }
     }
   });
   
-  // Clean each group and create new results
-  const cleanedResults: { website: string, email: string | null }[] = [];
-  
-  results.forEach(result => {
-    // Skip if already processed
-    if (cleanedResults.some(r => r.website === result.website)) {
-      return;
-    }
-    
-    const emails = websiteGroups[result.website];
-    if (!emails || emails.length === 0) {
-      cleanedResults.push(result); // Keep as is if no emails
-    } else if (emails.length === 1) {
-      cleanedResults.push({
-        website: result.website,
-        email: emails[0]
-      });
-    } else {
-      // Find the common/cleanest email from the set
-      const cleanedEmail = findCommonEmail(emails);
-      cleanedResults.push({
-        website: result.website,
-        email: cleanedEmail
-      });
-    }
-  });
-  
-  return cleanedResults;
-};
+  return emailsByDomain;
+}
 
 export async function GET(request: NextRequest) {
-  // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
-  
+
   try {
-    // Extract the ID from the URL path
-    const pathParts = request.nextUrl.pathname.split('/');
-    const id = pathParts[pathParts.length - 2]; // Get the ID from the URL path
-    
-    console.log(`Download requested for job ID: ${id}`);
-    
+    // Extract job ID from request URL
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').slice(-2)[0]; // Get the ID from the path
+
+    if (!id) {
+      return NextResponse.json({ error: 'Job ID is required' }, { status: 400 });
+    }
+
+    console.log(`Download request for job ID: ${id}`);
+
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
-      return new Response('Unauthorized', { status: 401 });
+      console.log('Download request - No session found');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    
-    // Get user ID
+
     const userId = session.user.id;
-    console.log(`User ID: ${userId}`);
+    console.log(`Download request - User ID: ${userId}`);
+
+    let results: any[] = [];
+    let jobName = 'job-export';
     
     // For hardcoded users, check in-memory store first
-    if (userId.startsWith('hardcoded-')) {
-      console.log(`Checking in-memory store for job ${id}`);
+    if (userId.startsWith('hardcoded-') && hardcodedJobs.has(id)) {
+      console.log(`Checking in-memory job for hardcoded user ${userId}`);
+      const job = hardcodedJobs.get(id);
       
-      // If we have the job in our in-memory store, use that data
-      if (hardcodedJobs.has(id)) {
-        console.log(`Found job ${id} in memory store`);
-        const job = hardcodedJobs.get(id);
-        
-        // Generate CSV from in-memory results
-        let csv = 'Website,Email\n';
-        job.results.forEach((result: { website: string, email: string | null }) => {
-          csv += `"${result.website}","${result.email || ''}"\n`;
-        });
-
-        const headers = new Headers();
-        headers.append('Content-Type', 'text/csv');
-        headers.append(
-          'Content-Disposition',
-          `attachment; filename="emails-${id}.csv"`
-        );
-
-        return new Response(csv, {
-          headers,
-        });
+      // Check if this job belongs to this user
+      if (job.userId !== userId) {
+        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
+      
+      console.log(`Found in-memory job ${id} with ${job.results?.length || 0} results`);
+      results = job.results || [];
+      jobName = job.name || 'job-export';
     }
-
-    // Standard flow for all users with database access
-    console.log(`Fetching job ${id} from database`);
-    try {
-      // Fetch the job
+    
+    // If results are empty, try to fetch from database
+    // Always fetch from database for non-hardcoded users
+    if (results.length === 0 || !userId.startsWith('hardcoded-')) {
+      console.log(`Fetching job ${id} results from database`);
+      
+      // Get job from database
       const job = await freshPrisma.job.findUnique({
         where: { id },
+        include: {
+          results: true,
+        },
       });
 
       if (!job) {
-        return new Response('Job not found', { status: 404 });
+        console.log(`Job ${id} not found in database`);
+        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
       }
 
       // Check if the job belongs to the current user
       if (job.userId !== userId) {
-        return new Response('Unauthorized', { status: 403 });
+        console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
 
-      // Fetch the job results
-      const results = await freshPrisma.result.findMany({
-        where: { jobId: id },
-        orderBy: { createdAt: 'asc' },
-      });
-
-      console.log(`Found ${results.length} results for job ${id}`);
-
-      // Clean and group emails
-      const cleanedResults = groupAndCleanEmails(results);
-
-      // Generate CSV
-      let csv = 'Website,Email\n';
-      cleanedResults.forEach((result) => {
-        csv += `"${result.website}","${result.email || ''}"\n`;
-      });
-
-      const headers = new Headers();
-      headers.append('Content-Type', 'text/csv');
-      headers.append(
-        'Content-Disposition',
-        `attachment; filename="emails-${id}.csv"`
-      );
-
-      return new Response(csv, {
-        headers,
-      });
-    } catch (error) {
-      console.error('Database operation error:', error);
-      return new Response(`Database error: ${String(error)}`, { status: 500 });
+      jobName = job.name || 'job-export';
+      results = job.results;
+      console.log(`Found database job ${id} with ${results.length} results`);
     }
+
+    // Convert results to CSV
+    let csv = 'Website,Email\n';
+    
+    // Group emails by domain for quality control
+    const emailsByDomain = groupAndCleanEmails(results);
+    
+    // Map of websites to their corresponding emails (cleaned)
+    const websiteToEmail: Map<string, string> = new Map();
+    
+    // Process each result and map website to best email
+    results.forEach(result => {
+      let website = result.website || '';
+      
+      // Clean up website for CSV (remove http/https)
+      if (website.startsWith('http://')) {
+        website = website.substring(7);
+      } else if (website.startsWith('https://')) {
+        website = website.substring(8);
+      }
+      
+      // Remove trailing slash if present
+      if (website.endsWith('/')) {
+        website = website.substring(0, website.length - 1);
+      }
+      
+      // Only add if we have a website
+      if (website) {
+        if (result.email) {
+          websiteToEmail.set(website, result.email);
+        } else if (!websiteToEmail.has(website)) {
+          // Only set to empty if we don't already have an email for this website
+          websiteToEmail.set(website, '');
+        }
+      }
+    });
+    
+    // Build CSV from the map
+    websiteToEmail.forEach((email, website) => {
+      // Escape quotes in CSV
+      const safeWebsite = website.replace(/"/g, '""');
+      const safeEmail = email.replace(/"/g, '""');
+      
+      csv += `"${safeWebsite}","${safeEmail}"\n`;
+    });
+
+    // Set response headers for CSV download
+    const filename = `${jobName.replace(/[^\w\s-]/gi, '')}-${new Date().toISOString().slice(0, 10)}.csv`;
+    
+    return new NextResponse(csv, {
+      headers: {
+        'Content-Type': 'text/csv',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
   } catch (error) {
-    console.error('Download job results error:', error);
-    return new Response('Failed to download job results', { status: 500 });
+    console.error('Error generating CSV:', error);
+    return NextResponse.json({ error: 'Failed to generate CSV' }, { status: 500 });
   } finally {
-    // Clean up the Prisma client
     await freshPrisma.$disconnect();
   }
 }

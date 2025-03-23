@@ -205,48 +205,110 @@ export async function POST(request: NextRequest) {
       
       // For hardcoded users, use in-memory processing to avoid DB errors
       if (userId.startsWith('hardcoded-')) {
-        console.log('Creating in-memory job for hardcoded user');
+        console.log('Creating job for hardcoded user - storing in memory AND database');
         
-        // Create a real job with a unique ID
+        // Create a real job ID
         const jobId = `job-${uuidv4()}`;
-        const newJob = {
-          id: jobId,
-          name: jobName || `${columnName} extraction`,
-          sheetUrl,
-          columnName,
-          status: 'created',
-          totalWebsites: urls.length,
-          processedWebsites: 0,
-          progress: 0,
-          results: [],
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          userId: userId
-        };
         
-        // Store in memory
-        hardcodedJobs.set(jobId, newJob);
-        
-        // Start processing in background
-        setTimeout(() => {
-          processJob(jobId, urls);
-        }, 100);
-        
-        return NextResponse.json({
-          job: {
+        try {
+          // Save to database first
+          prisma = prismaClientSingleton();
+          const dbJob = await prisma.job.create({
+            data: {
+              id: jobId, // Use our generated ID
+              sheetUrl,
+              columnName,
+              status: 'pending',
+              totalUrls: urls.length,
+              userId: userId,
+              name: jobName || `${columnName} extraction`,
+            },
+          });
+          
+          console.log(`Created database job for hardcoded user: ${dbJob.id}`);
+          
+          // Now also store in memory for real-time processing
+          const newJob = {
             id: jobId,
-            name: newJob.name,
+            name: jobName || `${columnName} extraction`,
             sheetUrl,
             columnName,
             status: 'created',
-            totalUrls: urls.length,
-            processedUrls: 0,
+            totalWebsites: urls.length,
+            processedWebsites: 0,
             progress: 0,
-            createdAt: newJob.createdAt,
-            updatedAt: newJob.updatedAt,
-            userId
-          }
-        }, { status: 201 });
+            results: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            userId: userId
+          };
+          
+          // Store in memory
+          hardcodedJobs.set(jobId, newJob);
+          
+          // Start processing in background
+          setTimeout(() => {
+            processJob(jobId, urls);
+          }, 100);
+          
+          return NextResponse.json({
+            job: {
+              id: jobId,
+              name: newJob.name,
+              sheetUrl,
+              columnName,
+              status: 'created',
+              totalUrls: urls.length,
+              processedUrls: 0,
+              progress: 0,
+              createdAt: newJob.createdAt,
+              updatedAt: newJob.updatedAt,
+              userId
+            }
+          }, { status: 201 });
+        } catch (dbError) {
+          console.error('Error saving hardcoded job to database:', dbError);
+          
+          // Fall back to memory-only if database fails
+          const newJob = {
+            id: jobId,
+            name: jobName || `${columnName} extraction`,
+            sheetUrl,
+            columnName,
+            status: 'created',
+            totalWebsites: urls.length,
+            processedWebsites: 0,
+            progress: 0,
+            results: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            userId: userId
+          };
+          
+          // Store in memory only
+          hardcodedJobs.set(jobId, newJob);
+          
+          // Start processing in background
+          setTimeout(() => {
+            processJob(jobId, urls);
+          }, 100);
+          
+          return NextResponse.json({
+            job: {
+              id: jobId,
+              name: newJob.name,
+              sheetUrl,
+              columnName,
+              status: 'created',
+              totalUrls: urls.length,
+              processedUrls: 0,
+              progress: 0,
+              createdAt: newJob.createdAt,
+              updatedAt: newJob.updatedAt,
+              userId
+            }
+          }, { status: 201 });
+        }
       }
 
       // Create a fresh Prisma client for database operations

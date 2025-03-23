@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { prismaClientSingleton } from './prisma';
 import { parse } from 'tldts';
+import { hardcodedJobs } from './hardcodedJobs';
 
 // Constants
 const IGNORE_DOMAINS = [
@@ -54,154 +55,137 @@ function extractJsonEmails(obj: any): string[] {
  * Start the email scraping process for a job
  */
 export async function startEmailScraping(jobId: string, urls: string[]) {
-  console.log(`Starting email scraping for job ${jobId} with ${urls.length} URLs`);
-  
-  // Create a fresh client for initial job update
-  let prisma = prismaClientSingleton();
+  const prisma = prismaClientSingleton();
   
   try {
     // Update job status to processing
     await prisma.job.update({
       where: { id: jobId },
-      data: { status: 'processing' },
+      data: { status: 'processing' }
     });
-  } catch (error) {
-    console.error(`Failed to update job status for ${jobId}:`, error);
-  } finally {
-    // Always disconnect after each database operation
-    await prisma.$disconnect();
-  }
-
-  let processedCount = 0;
-  
-  try {
-    // Process in batches to manage memory and avoid overwhelming the server
-    const batchSize = 3; // process 3 websites at a time (reduced from 5)
+    
+    console.log(`Starting email scraping for job ${jobId} with ${urls.length} URLs`);
+    
+    // Process URLs in batches
+    const batchSize = 5;
+    let processedCount = 0;
     
     for (let i = 0; i < urls.length; i += batchSize) {
       const batch = urls.slice(i, i + batchSize);
       
+      // Process batch in parallel
       await Promise.all(batch.map(async (url) => {
         try {
-          // Fix URLs without protocol
-          if (!url.startsWith('http')) {
-            url = 'https://' + url;
+          // Get email from website
+          const email = await extractEmailFromWebsite(url);
+          
+          // Save result to database
+          await prisma.result.create({
+            data: {
+              jobId,
+              website: url,
+              email: email || null
+            }
+          });
+          
+          // Update in-memory job if it exists (for hardcoded users)
+          if (hardcodedJobs.has(jobId)) {
+            const memoryJob = hardcodedJobs.get(jobId);
+            if (memoryJob && memoryJob.results) {
+              memoryJob.results.push({
+                website: url,
+                email: email || null
+              });
+              memoryJob.processedWebsites = (memoryJob.processedWebsites || 0) + 1;
+              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / memoryJob.totalWebsites) * 100));
+              memoryJob.updatedAt = new Date().toISOString();
+              hardcodedJobs.set(jobId, memoryJob);
+            }
           }
           
-          // Extract emails from the website
-          const emails = await extractEmails(url);
+          processedCount++;
           
-          // Create a new client for each batch of database operations
-          const batchPrisma = prismaClientSingleton();
-          
-          try {
-            // Save primary result to database
-            await batchPrisma.result.create({
-              data: {
-                jobId,
-                website: url,
-                email: emails.length > 0 ? emails[0] : null,
-              },
-            });
-
-            // For multiple emails, save additional results
-            if (emails.length > 1) {
-              for (let j = 1; j < Math.min(emails.length, 3); j++) { // Limit to 3 emails max
-                await batchPrisma.result.create({
-                  data: {
-                    jobId,
-                    website: url,
-                    email: emails[j],
-                  },
-                });
-              }
-            }
-          } catch (error) {
-            console.error(`Error saving results for URL ${url}:`, error);
-          } finally {
-            // Close the batch client
-            await batchPrisma.$disconnect();
+          // Log progress
+          if (processedCount % 10 === 0 || processedCount === urls.length) {
+            console.log(`Job ${jobId}: Processed ${processedCount}/${urls.length} URLs`);
           }
         } catch (error) {
           console.error(`Error processing URL ${url}:`, error);
           
-          // Create a client just for this error result
-          const errorPrisma = prismaClientSingleton();
-          try {
-            // Save failed result
-            await errorPrisma.result.create({
-              data: {
-                jobId,
+          // Save error result to database
+          await prisma.result.create({
+            data: {
+              jobId,
+              website: url,
+              email: null
+            }
+          });
+          
+          // Update in-memory job if it exists (for hardcoded users)
+          if (hardcodedJobs.has(jobId)) {
+            const memoryJob = hardcodedJobs.get(jobId);
+            if (memoryJob && memoryJob.results) {
+              memoryJob.results.push({
                 website: url,
-                email: null,
-              },
-            });
-          } catch (innerError) {
-            console.error(`Error saving failure for ${url}:`, innerError);
-          } finally {
-            await errorPrisma.$disconnect();
+                email: null
+              });
+              memoryJob.processedWebsites = (memoryJob.processedWebsites || 0) + 1;
+              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / memoryJob.totalWebsites) * 100));
+              memoryJob.updatedAt = new Date().toISOString();
+              hardcodedJobs.set(jobId, memoryJob);
+            }
           }
+          
+          processedCount++;
         }
-        
-        // Increment counter for tracking progress
-        processedCount++;
       }));
       
-      // Update progress with a new client after each batch
-      const progressPrisma = prismaClientSingleton();
-      try {
-        const progress = Math.round((processedCount / urls.length) * 100);
-        
-        await progressPrisma.job.update({
-          where: { id: jobId },
-          data: { 
-            processedUrls: processedCount,
-            progress,
-          },
-        });
-      } catch (error) {
-        console.error(`Error updating progress for job ${jobId}:`, error);
-      } finally {
-        await progressPrisma.$disconnect();
-      }
-      
-      // Add small delay between batches
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Small delay between batches to avoid overwhelming system
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-
-    // Final update with completed status using a new client
-    const finalPrisma = prismaClientSingleton();
-    try {
-      await finalPrisma.job.update({
-        where: { id: jobId },
-        data: { 
-          status: 'completed',
-          progress: 100,
-        },
-      });
-    } catch (error) {
-      console.error(`Error setting job ${jobId} as completed:`, error);
-    } finally {
-      await finalPrisma.$disconnect();
-    }
-  } catch (error) {
-    console.error(`Error processing job ${jobId}:`, error);
     
-    // Update job status to failed using a new client
-    const errorPrisma = prismaClientSingleton();
-    try {
-      await errorPrisma.job.update({
-        where: { id: jobId },
-        data: { 
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-      });
-    } catch (innerError) {
-      console.error(`Error setting job ${jobId} as failed:`, innerError);
-    } finally {
-      await errorPrisma.$disconnect();
+    // Update job status to completed
+    await prisma.job.update({
+      where: { id: jobId },
+      data: { status: 'completed' }
+    });
+    
+    // Update in-memory job if it exists
+    if (hardcodedJobs.has(jobId)) {
+      const memoryJob = hardcodedJobs.get(jobId);
+      if (memoryJob) {
+        memoryJob.status = 'completed';
+        memoryJob.progress = 100;
+        memoryJob.updatedAt = new Date().toISOString();
+        hardcodedJobs.set(jobId, memoryJob);
+      }
     }
+    
+    console.log(`Email scraping completed for job ${jobId}`);
+  } catch (error) {
+    console.error(`Error in email scraping job ${jobId}:`, error);
+    
+    // Mark job as failed in database
+    try {
+      await prisma.job.update({
+        where: { id: jobId },
+        data: { status: 'failed' }
+      });
+    } catch (updateError) {
+      console.error(`Failed to update job status for ${jobId}:`, updateError);
+    }
+    
+    // Update in-memory job if it exists
+    if (hardcodedJobs.has(jobId)) {
+      const memoryJob = hardcodedJobs.get(jobId);
+      if (memoryJob) {
+        memoryJob.status = 'failed';
+        memoryJob.updatedAt = new Date().toISOString();
+        hardcodedJobs.set(jobId, memoryJob);
+      }
+    }
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
@@ -788,4 +772,104 @@ async function extractEmails(baseUrl: string): Promise<string[]> {
   const sortedEmails = [...domainEmails.sort(), ...otherEmails.sort()];
   
   return sortedEmails;
+}
+
+// Extract email from a website
+async function extractEmailFromWebsite(website: string): Promise<string | null> {
+  console.log(`Extracting email from: ${website}`);
+  
+  try {
+    // Ensure website has http/https prefix
+    let url = website;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    
+    // Fetch the website content
+    const response = await axios.get(url, {
+      timeout: 10000, // 10 second timeout
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+    
+    // Extract emails from the HTML content
+    const emails = extractEmailsFromHtml(response.data);
+    
+    if (emails.length > 0) {
+      // Get most relevant email (contact, info, etc.)
+      const priorityEmails = emails.filter(email => {
+        const lowerEmail = email.toLowerCase();
+        return lowerEmail.includes('contact') || 
+               lowerEmail.includes('info') || 
+               lowerEmail.includes('hello') || 
+               lowerEmail.includes('support');
+      });
+      
+      return priorityEmails.length > 0 ? priorityEmails[0] : emails[0];
+    }
+    
+    return null;
+  } catch (error) {
+    // Try with http if https failed
+    if (website.includes('https://')) {
+      try {
+        const httpUrl = website.replace('https://', 'http://');
+        const response = await axios.get(httpUrl, {
+          timeout: 10000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        });
+        
+        const emails = extractEmailsFromHtml(response.data);
+        
+        if (emails.length > 0) {
+          // Get most relevant email
+          const priorityEmails = emails.filter(email => {
+            const lowerEmail = email.toLowerCase();
+            return lowerEmail.includes('contact') || 
+                   lowerEmail.includes('info') || 
+                   lowerEmail.includes('hello') || 
+                   lowerEmail.includes('support');
+          });
+          
+          return priorityEmails.length > 0 ? priorityEmails[0] : emails[0];
+        }
+        
+        return null;
+      } catch (innerError: any) {
+        console.error(`Failed to fetch ${website} with HTTP:`, innerError);
+        throw new Error(`Failed to access website: ${innerError.message}`);
+      }
+    }
+    
+    console.error(`Failed to fetch ${website}:`, error);
+    throw new Error(`Failed to access website: ${(error as Error).message}`);
+  }
+}
+
+// Extract emails from HTML
+function extractEmailsFromHtml(html: string): string[] {
+  try {
+    const $ = cheerio.load(html);
+    const bodyText = $('body').text();
+    
+    // Email regex pattern
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const emails = bodyText.match(emailRegex) || [];
+    
+    // Filter out common service emails
+    return emails.filter(email => {
+      const lowerEmail = email.toLowerCase();
+      return !lowerEmail.includes('noreply') && 
+             !lowerEmail.includes('no-reply') && 
+             !lowerEmail.includes('donotreply') && 
+             !lowerEmail.includes('no_reply') &&
+             !lowerEmail.includes('example.com');
+    });
+  } catch (error) {
+    console.error('Error extracting emails from HTML:', error);
+    return [];
+  }
 } 
