@@ -322,16 +322,4 @@ export async function loadJobsFromDatabase() {
   } catch (error) {
     console.error("Error loading jobs from database:", error);
   }
-}
-
-// Initialize with some dummy jobs for debugging if needed
-// This can be called from other files to maintain state
-export function initializeMemoryJobs() {
-  if (process.env.NODE_ENV !== 'production' && hardcodedJobs.size() === 0) {
-    console.log("Initializing in-memory jobs map for development");
-    
-    // Add test jobs if needed
-    // const testJobId = `job-test-${Date.now()}`;
-    // hardcodedJobs.set(testJobId, {...});
-  }
 } 
