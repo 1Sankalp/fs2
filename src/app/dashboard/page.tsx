@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
@@ -22,6 +22,8 @@ function DashboardContent() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Update URL when tab changes
   useEffect(() => {
@@ -32,6 +34,33 @@ function DashboardContent() {
     window.history.replaceState(null, '', newUrl);
   }, [activeTab]);
 
+  // Handle job refresh manually
+  const refreshJobs = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/jobs');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch jobs: ${response.status}`);
+      }
+      const data = await response.json();
+      console.log('Refreshed jobs:', data);
+      setJobs(data.jobs || []);
+      return data.jobs || [];
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+      setError('Failed to load jobs. Please try again.');
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle job deletion
+  const handleJobDeleted = async (jobId: string) => {
+    // Remove the deleted job from the state
+    setJobs((currentJobs) => currentJobs.filter((job: any) => job.id !== jobId));
+  };
+
   // Load jobs when component mounts
   useEffect(() => {
     async function loadJobs() {
@@ -39,7 +68,7 @@ function DashboardContent() {
         // Import and call loadJobsFromDatabase when component mounts
         const { loadJobsFromDatabase } = await import('@/lib/hardcodedJobs');
         await loadJobsFromDatabase();
-        setRefreshTrigger(prev => prev + 1); // Trigger a refresh after loading
+        refreshJobs(); // Use the refreshJobs function to load jobs initially
       } catch (error) {
         console.error('Error loading jobs in dashboard:', error);
       }
@@ -47,38 +76,38 @@ function DashboardContent() {
     
     loadJobs();
     
-    // Update polling frequency to 3 seconds for more "live" updates
-    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 3000);
-    return () => clearInterval(refreshInterval);
-  }, []);
-
-  // Get job list
-  useEffect(() => {
-    const getJobs = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch('/api/jobs');
-        if (!response.ok) {
-          throw new Error(`Failed to fetch jobs: ${response.status}`);
-        }
-        const data = await response.json();
-        console.log('Fetched jobs:', data);
-        setJobs(data.jobs || []);
-      } catch (error) {
-        console.error('Error fetching jobs:', error);
-        setError('Failed to load jobs. Please try again.');
-        setJobs([]);
-      } finally {
-        setLoading(false);
+    return () => {
+      // Clear auto-refresh interval when component unmounts
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
       }
     };
+  }, []); // Only run once on mount
+
+  // Set up auto-refresh if enabled
+  useEffect(() => {
+    // Clear existing interval if any
+    if (autoRefreshIntervalRef.current) {
+      clearInterval(autoRefreshIntervalRef.current);
+      autoRefreshIntervalRef.current = null;
+    }
     
-    getJobs();
+    // Set up new interval if auto-refresh is enabled
+    if (autoRefreshEnabled) {
+      autoRefreshIntervalRef.current = setInterval(() => {
+        // Only auto-refresh if the jobs tab is active
+        if (activeTab === 'jobs') {
+          refreshJobs();
+        }
+      }, 5000); // 5 seconds interval
+    }
     
-    // Update polling frequency to 3 seconds for more "live" updates
-    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 3000);
-    return () => clearInterval(refreshInterval);
-  }, [session, refreshTrigger]);
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+      }
+    };
+  }, [autoRefreshEnabled, activeTab]);
 
   if (!session) {
     return null; // Will redirect to login page due to the useEffect in parent
@@ -109,7 +138,7 @@ function DashboardContent() {
               <div className="flex items-center text-sm bg-white py-2 px-4 rounded-full border border-slate-200 shadow-sm">
                 <FiUser className="mr-2 text-primary-600" />
                 <span className="font-medium text-slate-700 truncate max-w-[200px]">
-                  {session.user.name || session.user.email}
+                  {session.user?.name || session.user?.email}
                 </span>
               </div>
               
@@ -167,7 +196,7 @@ function DashboardContent() {
                 >
                   <ScraperForm onSuccess={() => {
                     setActiveTab('jobs');
-                    setRefreshTrigger(prev => prev + 1); // Refresh job list after new job creation
+                    refreshJobs(); // Refresh job list after new job creation
                   }} />
                 </motion.div>
               ) : (
@@ -176,7 +205,13 @@ function DashboardContent() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                 >
-                  <JobsList jobs={jobs} loading={loading} error={error} />
+                  <JobsList 
+                    jobs={jobs} 
+                    loading={loading} 
+                    error={error} 
+                    onRefresh={refreshJobs}
+                    onDelete={handleJobDeleted}
+                  />
                 </motion.div>
               )}
             </div>
@@ -190,8 +225,21 @@ function DashboardContent() {
             <div className="text-xs text-slate-500">
               &copy; {new Date().getFullYear()} FunnelStrike. All rights reserved.
             </div>
-            <div className="flex items-center text-xs text-slate-500">
-              <FiClock className="mr-1" /> Last updated: {new Date().toLocaleDateString()}
+            <div className="flex items-center space-x-3">
+              <div className="text-xs text-slate-500 flex items-center">
+                <FiClock className="mr-1" /> Last updated: {new Date().toLocaleDateString()}
+              </div>
+              <button 
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                className={`flex items-center text-xs py-1 px-2 rounded ${
+                  autoRefreshEnabled 
+                    ? 'bg-green-50 text-green-700' 
+                    : 'bg-slate-50 text-slate-700'
+                }`}
+              >
+                <FiRefreshCw className={`mr-1 ${autoRefreshEnabled ? 'text-green-600' : 'text-slate-600'}`} size={12} />
+                {autoRefreshEnabled ? 'Auto-refresh on' : 'Auto-refresh off'}
+              </button>
             </div>
           </div>
         </div>
@@ -213,10 +261,35 @@ function DashboardLoading() {
 }
 
 // Add the JobsList component
-const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, error: string | null }) => {
+const JobsList = ({ jobs, loading, error, onRefresh, onDelete }: { 
+  jobs: any[], 
+  loading: boolean, 
+  error: string | null, 
+  onRefresh: () => Promise<any[]>, 
+  onDelete: (jobId: string) => Promise<void> 
+}) => {
+  const [refreshing, setRefreshing] = useState(false);
+  
+  const handleRefreshJobs = async () => {
+    setRefreshing(true);
+    try {
+      const refreshedJobs = await onRefresh();
+      console.log('Manually refreshed jobs:', refreshedJobs);
+      // Return the data (parent component will update its state)
+      return refreshedJobs;
+    } catch (error) {
+      console.error('Error refreshing jobs:', error);
+      // Return empty array on error
+      return [];
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleDeleteJob = async (jobId: string) => {
     if (confirm('Are you sure you want to delete this job?')) {
       try {
+        // First delete from the server
         const response = await fetch(`/api/jobs/${jobId}`, {
           method: 'DELETE',
         });
@@ -225,17 +298,22 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
           throw new Error(`Failed to delete job: ${response.status}`);
         }
         
-        // Provide visual feedback (the parent component will refresh the jobs list)
+        // Then update the parent component's state
+        await onDelete(jobId);
+        
+        // Provide visual feedback without reloading the page
         alert('Job deleted successfully');
-        window.location.reload();
+        return jobId;
       } catch (error) {
         console.error('Error deleting job:', error);
         alert('Failed to delete job. Please try again.');
+        return null;
       }
     }
+    return null;
   };
 
-  if (loading) {
+  if (loading && !refreshing) {
     return (
       <div className="p-8 text-center">
         <div className="animate-pulse flex justify-center mb-3">
@@ -341,11 +419,12 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-medium text-slate-800">Your Extraction Jobs</h2>
         <button
-          onClick={() => window.location.reload()}
+          onClick={handleRefreshJobs}
           className="flex items-center space-x-2 bg-primary-50 hover:bg-primary-100 text-primary-700 py-2 px-3 rounded-md transition-colors text-sm"
+          disabled={refreshing}
         >
-          <FiRefreshCw className="mr-1" />
-          <span>Refresh</span>
+          <FiRefreshCw className={`mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+          <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
         </button>
       </div>
 
@@ -370,7 +449,7 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-slate-100">
+          <tbody className={`bg-white divide-y divide-slate-100 ${refreshing ? 'opacity-60' : ''}`}>
             {jobs.map((job) => (
               <tr key={job.id} className="hover:bg-slate-50/50 transition-colors">
                 <td className="px-4 py-4 whitespace-nowrap">
@@ -443,6 +522,7 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
                     <button
                       onClick={() => handleDeleteJob(job.id)}
                       className="text-red-600 hover:text-red-800 ml-2"
+                      disabled={refreshing}
                     >
                       <FiTrash2 size={16} className="inline mr-1" /> Delete
                     </button>
