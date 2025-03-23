@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
 import ScraperForm from '../../components/ScraperForm';
-import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock } from 'react-icons/fi';
+import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
@@ -18,6 +18,10 @@ function DashboardContent() {
   const [activeTab, setActiveTab] = useState<'new' | 'jobs'>(
     tabParam === 'jobs' ? 'jobs' : 'new'
   );
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Update URL when tab changes
   useEffect(() => {
@@ -27,6 +31,47 @@ function DashboardContent() {
     
     window.history.replaceState(null, '', newUrl);
   }, [activeTab]);
+
+  // Load jobs when component mounts
+  useEffect(() => {
+    async function loadJobs() {
+      try {
+        // Import and call loadJobsFromDatabase when component mounts
+        const { loadJobsFromDatabase } = await import('@/lib/hardcodedJobs');
+        await loadJobsFromDatabase();
+        setRefreshTrigger(prev => prev + 1); // Trigger a refresh after loading
+      } catch (error) {
+        console.error('Error loading jobs in dashboard:', error);
+      }
+    }
+    
+    loadJobs();
+    
+    // Refresh job list every 30 seconds to catch any changes
+    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 30000);
+    return () => clearInterval(refreshInterval);
+  }, []);
+
+  // Get job list
+  useEffect(() => {
+    const getJobs = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/jobs');
+        const data = await response.json();
+        console.log('Fetched jobs:', data);
+        setJobs(data || []);
+      } catch (error) {
+        console.error('Error fetching jobs:', error);
+        setError('Failed to load jobs. Please try again.');
+        setJobs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    getJobs();
+  }, [session, refreshTrigger]);
 
   if (!session) {
     return null; // Will redirect to login page due to the useEffect in parent
@@ -108,25 +153,24 @@ function DashboardContent() {
 
             <div className="p-6">
               {activeTab === 'new' ? (
-                <div>
-                  <div className="mb-6">
-                    <h2 className="text-xl font-bold text-slate-800 mb-2">Start a New Email Extraction</h2>
-                    <p className="text-slate-600">
-                      Import a list of websites from a Google Sheet and start extracting email addresses.
-                    </p>
-                  </div>
-                  <ScraperForm />
-                </div>
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <ScraperForm onSuccess={() => {
+                    setActiveTab('jobs');
+                    setRefreshTrigger(prev => prev + 1); // Refresh job list after new job creation
+                  }} />
+                </motion.div>
               ) : (
-                <div>
-                  <div className="mb-6">
-                    <h2 className="text-xl font-bold text-slate-800 mb-2">Your Extraction Jobs</h2>
-                    <p className="text-slate-600">
-                      View and manage your email extraction jobs. Download results when complete.
-                    </p>
-                  </div>
-                  <JobList />
-                </div>
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <JobsList jobs={jobs} loading={loading} error={error} />
+                </motion.div>
               )}
             </div>
           </div>
@@ -160,6 +204,108 @@ function DashboardLoading() {
     </div>
   );
 }
+
+// Add the JobsList component
+const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, error: string | null }) => {
+  if (loading) {
+    return (
+      <div className="p-8 text-center">
+        <div className="animate-pulse flex justify-center mb-3">
+          <FiLoader className="text-primary-500 text-2xl" />
+        </div>
+        <p className="text-slate-600">Loading your jobs...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <div className="flex justify-center mb-3 text-red-500">
+          <FiAlertCircle className="text-2xl" />
+        </div>
+        <p className="text-slate-600">{error}</p>
+      </div>
+    );
+  }
+
+  if (jobs.length === 0) {
+    return (
+      <div className="p-8 text-center">
+        <div className="flex justify-center mb-3 text-slate-400">
+          <FiInbox className="text-3xl" />
+        </div>
+        <p className="text-slate-600 mb-2">No jobs found</p>
+        <p className="text-slate-500 text-sm">Create a new job to get started</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-slate-100">
+      {jobs.map((job) => (
+        <div key={job.id} className="p-4 hover:bg-slate-50 transition-colors">
+          <Link href={`/dashboard/results/${job.id}`} className="block">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-medium text-slate-800">{job.name}</h3>
+                <div className="text-sm text-slate-500 mt-1 flex items-center">
+                  <FiCalendar className="mr-1" size={14} />
+                  <span>{new Date(job.createdAt).toLocaleDateString()}</span>
+                  <span className="mx-2">•</span>
+                  <StatusBadge status={job.status} />
+                </div>
+              </div>
+              <div className="flex items-center">
+                <div className="text-right mr-4">
+                  <div className="text-sm font-medium text-slate-700">
+                    {job.processedUrls || 0}/{job.totalUrls || 0} processed
+                  </div>
+                  <div className="w-24 bg-slate-200 rounded-full h-2 mt-1">
+                    <div
+                      className="bg-primary-500 h-2 rounded-full"
+                      style={{ width: `${job.progress || 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+                <FiChevronRight className="text-slate-400" />
+              </div>
+            </div>
+          </Link>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// Add the StatusBadge component
+const StatusBadge = ({ status }: { status: string }) => {
+  let color = '';
+  let label = status;
+  
+  switch (status.toLowerCase()) {
+    case 'completed':
+      color = 'bg-green-100 text-green-800';
+      break;
+    case 'processing':
+      color = 'bg-blue-100 text-blue-800';
+      break;
+    case 'pending':
+      color = 'bg-yellow-100 text-yellow-800';
+      break;
+    case 'failed':
+      color = 'bg-red-100 text-red-800';
+      break;
+    default:
+      color = 'bg-slate-100 text-slate-800';
+  }
+  
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full ${color}`}>
+      {label}
+    </span>
+  );
+};
 
 export default function Dashboard() {
   const { data: session, status } = useSession();

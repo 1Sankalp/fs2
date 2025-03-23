@@ -116,10 +116,13 @@ async function authenticateUser(username: string, password: string): Promise<Use
       window.localStorage.setItem('hardcodedUserId', userId);
       console.log(`Stored hardcoded user ID in localStorage: ${userId}`);
       
-      // Import and call setCurrentUser if possible
+      // Import and call setCurrentUser and load jobs if possible
       try {
-        const { setCurrentUser } = await import('./hardcodedJobs');
+        const { setCurrentUser, loadJobsFromDatabase } = await import('./hardcodedJobs');
         setCurrentUser(userId);
+        
+        // Also load jobs from database to ensure we have all jobs
+        await loadJobsFromDatabase();
       } catch (error) {
         console.error('Error setting current user:', error);
       }

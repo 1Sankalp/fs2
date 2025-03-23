@@ -84,29 +84,26 @@ const saveToStorage = () => {
 const syncWithDatabase = async () => {
   if (typeof window !== 'undefined') {
     try {
-      // Only run for hardcoded users
+      // Check if we're in a hardcoded user session
       const storedUserId = window.localStorage.getItem('hardcodedUserId');
-      if (!storedUserId) {
-        console.log('Not a hardcoded user, skipping database sync');
-        return;
-      }
       
-      const userId = storedUserId;
-      console.log(`Syncing jobs for hardcoded user ${userId} with database`);
+      console.log(`Syncing jobs for all hardcoded users with database`);
       
       const prisma = prismaClientSingleton();
       
-      // Get jobs from database
+      // Get jobs from database for all hardcoded users instead of just current user
       const dbJobs = await prisma.job.findMany({
         where: { 
-          userId: userId 
+          userId: {
+            startsWith: 'hardcoded-'
+          }
         },
         include: {
           results: true
         }
       });
       
-      console.log(`Found ${dbJobs.length} jobs in database for user ${userId}`);
+      console.log(`Found ${dbJobs.length} hardcoded user jobs in database`);
       
       // Update in-memory store with database jobs
       dbJobs.forEach((dbJob) => {
@@ -276,6 +273,11 @@ export async function syncJobToDatabase(jobId: string) {
 // Initialize hardcoded jobs from database on startup
 // This helps restore state after server restarts
 export async function loadJobsFromDatabase() {
+  // Check if we're running client-side and need to initialize through storage first
+  if (typeof window !== 'undefined') {
+    initializeFromStorage();
+  }
+  
   if (hardcodedJobs.size() > 0) {
     console.log("In-memory jobs already exist, skipping database load");
     return;
@@ -323,6 +325,11 @@ export async function loadJobsFromDatabase() {
         updatedAt: job.updatedAt.toISOString(),
         userId: job.userId
       });
+    }
+    
+    // Save all loaded jobs to localStorage for client-side persistence
+    if (typeof window !== 'undefined') {
+      saveToStorage();
     }
     
     await prisma.$disconnect();
