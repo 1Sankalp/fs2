@@ -161,10 +161,21 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
   // Fetch job results
   useEffect(() => {
     if (session && jobId) {
-      const fetchJobResults = async () => {
+      const fetchJobResults = async (retryCount = 0, maxRetries = 2) => {
         try {
           setIsLoading(true);
-          const response = await fetch(`/api/jobs/${jobId}`);
+          
+          // Add a unique timestamp to prevent browser caching
+          const timestamp = new Date().getTime();
+          console.log(`Fetching job ${jobId} results, attempt ${retryCount + 1}, ts=${timestamp}`);
+          
+          const response = await fetch(`/api/jobs/${jobId}?_=${timestamp}`, {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            }
+          });
           
           if (!response.ok) {
             const errorData = await response.json();
@@ -178,10 +189,11 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
             setJobData(data.job);
           } else {
             console.error('No job data in response');
-            setError('Invalid job data returned from server');
+            throw new Error('Invalid job data returned from server');
           }
           
           if (Array.isArray(data.results)) {
+            console.log(`Received ${data.results.length} results for job ${jobId}`);
             setResults(data.results);
           } else {
             console.error('No results array in response');
@@ -189,6 +201,18 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
           }
         } catch (error) {
           console.error('Error fetching job results:', error);
+          
+          // Retry logic
+          if (retryCount < maxRetries) {
+            console.log(`Retrying fetch for job ${jobId} (attempt ${retryCount + 1} of ${maxRetries})`);
+            
+            // Wait with exponential backoff before retrying
+            const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s...
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            return fetchJobResults(retryCount + 1, maxRetries);
+          }
+          
           if (error instanceof Error) {
             setError(error.message);
           } else {

@@ -69,13 +69,12 @@ export async function GET(request: NextRequest) {
     // If we get here, we need to check the database with a fresh client
     console.log(`Fetching job ${id} from database for user ${userId}`);
     try {
+      // Create a fresh client with a unique connection ID to avoid prepared statement conflicts
       freshPrisma = prismaClientSingleton();
       
+      // First get the job without results to verify ownership
       const job = await freshPrisma.job.findUnique({
         where: { id },
-        include: {
-          results: { orderBy: { createdAt: 'asc' } },
-        },
       });
 
       if (!job) {
@@ -88,10 +87,19 @@ export async function GET(request: NextRequest) {
         console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
-
-      console.log(`Successfully found job ${id} for user ${userId} in database`);
+      
+      console.log(`Successfully found job ${id} for user ${userId} in database, fetching results...`);
+      
+      // Now get the results in a separate query to avoid prepared statement issues
+      const results = await freshPrisma.result.findMany({
+        where: { jobId: id },
+        orderBy: { createdAt: 'asc' },
+      });
+      
+      console.log(`Found ${results.length} results for job ${id}`);
+      
       const totalWebsites = job.totalUrls || 0;
-      const processedWebsites = job.results.length;
+      const processedWebsites = results.length;
       const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
 
       // Format the response to match what the frontend expects
@@ -102,7 +110,7 @@ export async function GET(request: NextRequest) {
           totalUrls: totalWebsites,
           processedUrls: processedWebsites,
         },
-        results: job.results.map(result => ({
+        results: results.map(result => ({
           website: result.website,
           email: result.email
         }))

@@ -104,12 +104,9 @@ export async function GET(request: NextRequest) {
         // Create fresh client to avoid prepared statement conflicts
         freshPrisma = prismaClientSingleton();
         
-        // Get job from database
+        // First get the job without results to verify ownership
         const job = await freshPrisma.job.findUnique({
           where: { id },
-          include: {
-            results: true,
-          },
         });
 
         if (!job) {
@@ -124,16 +121,32 @@ export async function GET(request: NextRequest) {
         }
 
         jobName = job.name || 'job-export';
-        results = job.results;
-        console.log(`Found database job ${id} with ${results.length} results`);
+        
+        // Now get the results in a separate query
+        console.log(`Fetching results for job ${id} separately...`);
+        try {
+          const jobResults = await freshPrisma.result.findMany({
+            where: { 
+              jobId: id 
+            }
+          });
+          
+          console.log(`Found ${jobResults.length} results for job ${id}`);
+          results = jobResults;
+        } catch (resultsError) {
+          console.error(`Error fetching results for job ${id}:`, resultsError);
+          if (results.length === 0) {
+            return NextResponse.json({ error: 'Failed to fetch results' }, { status: 500 });
+          }
+        }
       } catch (dbError) {
-        console.error(`Database error fetching job ${id} results:`, dbError);
+        console.error(`Database error fetching job ${id}:`, dbError);
         
         // If we already have memory results, continue with those
         if (results.length > 0) {
           console.log(`Proceeding with ${results.length} memory results despite database error`);
         } else {
-          return NextResponse.json({ error: 'Database error fetching job results' }, { status: 500 });
+          return NextResponse.json({ error: 'Database error fetching job' }, { status: 500 });
         }
       } finally {
         if (freshPrisma) {
