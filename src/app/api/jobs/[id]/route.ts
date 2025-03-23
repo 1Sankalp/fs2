@@ -4,16 +4,10 @@ import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
 import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
-// Define the route parameters interface to match Next.js requirements
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
-
+// Next.js expects this specific params structure for dynamic routes
 export async function GET(
   request: NextRequest,
-  { params }: RouteParams
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -108,7 +102,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: RouteParams
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
@@ -183,4 +177,4 @@ export async function DELETE(
   } finally {
     await freshPrisma.$disconnect();
   }
-} 
+}
