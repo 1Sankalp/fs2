@@ -802,28 +802,12 @@ async function extractEmailFromWebsite(website: string): Promise<string | null> 
       url = 'https://' + url;
     }
     
-    // Fetch the website content
-    const response = await axios.get(url, {
-      timeout: 10000, // 10 second timeout
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-      }
-    });
-    
-    // Extract emails from the HTML content
-    const emails = extractEmailsFromHtml(response.data);
+    // Use enhanced extractEmails method that implements all techniques from app.py
+    const emails = await extractEmails(url);
     
     if (emails.length > 0) {
-      // Get most relevant email (contact, info, etc.)
-      const priorityEmails = emails.filter(email => {
-        const lowerEmail = email.toLowerCase();
-        return lowerEmail.includes('contact') || 
-               lowerEmail.includes('info') || 
-               lowerEmail.includes('hello') || 
-               lowerEmail.includes('support');
-      });
-      
-      return priorityEmails.length > 0 ? priorityEmails[0] : emails[0];
+      // Return the first email which is already prioritized by domain
+      return emails[0];
     }
     
     return null;
@@ -832,26 +816,10 @@ async function extractEmailFromWebsite(website: string): Promise<string | null> 
     if (website.includes('https://')) {
       try {
         const httpUrl = website.replace('https://', 'http://');
-        const response = await axios.get(httpUrl, {
-          timeout: 10000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          }
-        });
-        
-        const emails = extractEmailsFromHtml(response.data);
+        const emails = await extractEmails(httpUrl);
         
         if (emails.length > 0) {
-          // Get most relevant email
-          const priorityEmails = emails.filter(email => {
-            const lowerEmail = email.toLowerCase();
-            return lowerEmail.includes('contact') || 
-                   lowerEmail.includes('info') || 
-                   lowerEmail.includes('hello') || 
-                   lowerEmail.includes('support');
-          });
-          
-          return priorityEmails.length > 0 ? priorityEmails[0] : emails[0];
+          return emails[0]; // Return first prioritized email
         }
         
         return null;
@@ -866,7 +834,7 @@ async function extractEmailFromWebsite(website: string): Promise<string | null> 
   }
 }
 
-// Extract emails from HTML
+// This method is deprecated and replaced by comprehensive extractEmails implementation above
 function extractEmailsFromHtml(html: string): string[] {
   try {
     const $ = cheerio.load(html);

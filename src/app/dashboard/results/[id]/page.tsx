@@ -136,7 +136,7 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
   const [allCopied, setAllCopied] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Extract the ID from params promise
+  // Extract the ID from params promise and fetch job results
   useEffect(() => {
     const extractId = async () => {
       try {
@@ -145,6 +145,7 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
       } catch (error) {
         console.error('Error resolving params:', error);
         setError('Invalid job ID');
+        setIsLoading(false);
       }
     };
     
@@ -182,22 +183,70 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
           ...data.job,
           totalUrls: data.job.totalUrls || data.job.totalWebsites || 0,
           processedUrls: data.job.processedUrls || data.job.processedWebsites || 0,
-          progress: data.job.progress || 0,
-          results: data.job.results || []
+          progress: data.job.progress || 0
         };
         
         setJobData(normalizedJob);
+        
+        // Set results from either memory or database format
+        if (data.job.results) {
+          setResults(data.job.results);
+        } else if (data.results) {
+          setResults(data.results);
+        }
+        
         console.log('Job data loaded:', normalizedJob);
         
         // Start polling for updates if job is in progress
         if (normalizedJob.status === 'processing' || normalizedJob.status === 'pending') {
-          setIsLoading(true);
+          // Keep the loading state for the structure, but allow content to show
+          setIsLoading(false);
+          
+          // Set up polling for ongoing jobs every 3 seconds
+          const interval = setInterval(async () => {
+            try {
+              const refreshResponse = await fetch(`/api/jobs/${jobId}`);
+              if (!refreshResponse.ok) {
+                throw new Error('Failed to refresh job data');
+              }
+              
+              const refreshData = await refreshResponse.json();
+              if (refreshData.job) {
+                const updatedJob = {
+                  ...refreshData.job,
+                  totalUrls: refreshData.job.totalUrls || refreshData.job.totalWebsites || 0,
+                  processedUrls: refreshData.job.processedUrls || refreshData.job.processedWebsites || 0,
+                  progress: refreshData.job.progress || 0
+                };
+                
+                setJobData(updatedJob);
+                
+                // Update results if available
+                if (refreshData.job.results) {
+                  setResults(refreshData.job.results);
+                } else if (refreshData.results) {
+                  setResults(refreshData.results);
+                }
+                
+                // If job is no longer in progress, clear the interval
+                if (updatedJob.status !== 'processing' && updatedJob.status !== 'pending') {
+                  clearInterval(interval);
+                }
+              }
+            } catch (err) {
+              console.error('Error polling job data:', err);
+              // Don't set error or change loading state on polling errors
+            }
+          }, 3000);
+          
+          return () => clearInterval(interval);
         } else {
           setIsLoading(false);
         }
       } catch (err) {
         console.error('Error loading job data:', err);
         setError(err instanceof Error ? err.message : 'Failed to load job');
+        setIsLoading(false);
       }
     }
     

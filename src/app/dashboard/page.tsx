@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import JobList from '../../components/JobList';
 import ScraperForm from '../../components/ScraperForm';
-import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar, FiCheckCircle, FiInfo } from 'react-icons/fi';
+import { FiPlusCircle, FiList, FiLogOut, FiUser, FiMail, FiHome, FiClock, FiLoader, FiAlertCircle, FiInbox, FiChevronRight, FiCalendar, FiCheckCircle, FiInfo, FiRefreshCw, FiDownload, FiTrash2, FiSearch } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 
@@ -47,8 +47,8 @@ function DashboardContent() {
     
     loadJobs();
     
-    // Refresh job list every 30 seconds to catch any changes
-    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 30000);
+    // Update polling frequency to 3 seconds for more "live" updates
+    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 3000);
     return () => clearInterval(refreshInterval);
   }, []);
 
@@ -74,6 +74,10 @@ function DashboardContent() {
     };
     
     getJobs();
+    
+    // Update polling frequency to 3 seconds for more "live" updates
+    const refreshInterval = setInterval(() => setRefreshTrigger(prev => prev + 1), 3000);
+    return () => clearInterval(refreshInterval);
   }, [session, refreshTrigger]);
 
   if (!session) {
@@ -210,6 +214,27 @@ function DashboardLoading() {
 
 // Add the JobsList component
 const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, error: string | null }) => {
+  const handleDeleteJob = async (jobId: string) => {
+    if (confirm('Are you sure you want to delete this job?')) {
+      try {
+        const response = await fetch(`/api/jobs/${jobId}`, {
+          method: 'DELETE',
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Failed to delete job: ${response.status}`);
+        }
+        
+        // Provide visual feedback (the parent component will refresh the jobs list)
+        alert('Job deleted successfully');
+        window.location.reload();
+      } catch (error) {
+        console.error('Error deleting job:', error);
+        alert('Failed to delete job. Please try again.');
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-8 text-center">
@@ -312,80 +337,122 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
   };
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-slate-50">
-          <tr>
-            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Status
-            </th>
-            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Job Details
-            </th>
-            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Progress
-            </th>
-            <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-              Created
-            </th>
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-slate-100">
-          {jobs.map((job) => (
-            <tr key={job.id} className="hover:bg-slate-50/50 transition-colors">
-              <td className="px-4 py-4 whitespace-nowrap">
-                <div className="flex items-center">
-                  {getStatusIcon(job.status || 'pending')}
-                  <span className="ml-2 text-sm text-slate-700">
-                    {getStatusText(job.status || 'pending')}
-                  </span>
-                </div>
-              </td>
-              <td className="px-4 py-4">
-                <div className="flex flex-col">
-                  <Link href={`/dashboard/results/${job.id}`} className="text-sm text-slate-900 mb-1 font-medium hover:text-primary-600">
-                    {job.name || `${job.columnName} extraction`}
-                  </Link>
-                  <span className="text-xs text-slate-500">
-                    Column: {job.columnName}
-                  </span>
-                </div>
-              </td>
-              <td className="px-4 py-4 whitespace-nowrap">
-                <div className="flex flex-col space-y-1">
-                  <div className="flex justify-between text-xs text-slate-500 mb-1">
-                    <span>{(job.processedUrls || job.processedWebsites || 0)} of {(job.totalUrls || job.totalWebsites || 0)}</span>
-                    <span>
-                      {(job.totalUrls || job.totalWebsites) > 0
-                        ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
-                        : 0}%
+    <div>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-medium text-slate-800">Your Extraction Jobs</h2>
+        <button
+          onClick={() => window.location.reload()}
+          className="flex items-center space-x-2 bg-primary-50 hover:bg-primary-100 text-primary-700 py-2 px-3 rounded-md transition-colors text-sm"
+        >
+          <FiRefreshCw className="mr-1" />
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-slate-50">
+            <tr>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                Job Details
+              </th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                Progress
+              </th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                Created
+              </th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-slate-100">
+            {jobs.map((job) => (
+              <tr key={job.id} className="hover:bg-slate-50/50 transition-colors">
+                <td className="px-4 py-4 whitespace-nowrap">
+                  <div className="flex items-center">
+                    {getStatusIcon(job.status || 'pending')}
+                    <span className="ml-2 text-sm text-slate-700">
+                      {getStatusText(job.status || 'pending')}
                     </span>
                   </div>
-                  <div className="w-full bg-slate-200 rounded-full h-1.5">
-                    <div 
-                      className="bg-primary-600 h-1.5 rounded-full"
-                      style={{ 
-                        width: `${(job.totalUrls || job.totalWebsites) > 0 
-                          ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
-                          : 0}%` 
-                      }}
-                    />
+                </td>
+                <td className="px-4 py-4">
+                  <div className="flex flex-col">
+                    <Link href={`/dashboard/results/${job.id}`} className="text-sm text-slate-900 mb-1 font-medium hover:text-primary-600">
+                      {job.name || `${job.columnName} extraction`}
+                    </Link>
+                    <span className="text-xs text-slate-500">
+                      Column: {job.columnName}
+                    </span>
                   </div>
-                  {(job.status === 'processing') && (
-                    <div className="mt-1 text-xs text-blue-600 flex items-center">
-                      <FiClock className="mr-1" size={12} />
-                      <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap">
+                  <div className="flex flex-col space-y-1">
+                    <div className="flex justify-between text-xs text-slate-500 mb-1">
+                      <span>{(job.processedUrls || job.processedWebsites || 0)} of {(job.totalUrls || job.totalWebsites || 0)}</span>
+                      <span>
+                        {(job.totalUrls || job.totalWebsites) > 0
+                          ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                          : 0}%
+                      </span>
                     </div>
-                  )}
-                </div>
-              </td>
-              <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
-                {new Date(job.createdAt).toLocaleString()}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    <div className="w-full bg-slate-200 rounded-full h-1.5">
+                      <div 
+                        className="bg-primary-600 h-1.5 rounded-full"
+                        style={{ 
+                          width: `${(job.totalUrls || job.totalWebsites) > 0 
+                            ? Math.round(((job.processedUrls || job.processedWebsites || 0) / (job.totalUrls || job.totalWebsites || 1)) * 100)
+                            : 0}%` 
+                        }}
+                      />
+                    </div>
+                    {(job.status === 'processing') && (
+                      <div className="mt-1 text-xs text-blue-600 flex items-center">
+                        <FiClock className="mr-1" size={12} />
+                        <span>ETA: {getEstimatedTimeRemaining(job) || 'Calculating...'}</span>
+                      </div>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm text-slate-500">
+                  {new Date(job.createdAt).toLocaleString()}
+                </td>
+                <td className="px-4 py-4 whitespace-nowrap text-sm font-medium">
+                  <div className="flex space-x-2">
+                    <Link
+                      href={`/dashboard/results/${job.id}`}
+                      className="text-primary-600 hover:text-primary-800"
+                    >
+                      <FiSearch size={16} className="inline mr-1" /> View
+                    </Link>
+                    
+                    {job.status === 'completed' && (
+                      <Link
+                        href={`/api/jobs/${job.id}/download`}
+                        className="text-emerald-600 hover:text-emerald-800 ml-2"
+                      >
+                        <FiDownload size={16} className="inline mr-1" /> Download
+                      </Link>
+                    )}
+                    
+                    <button
+                      onClick={() => handleDeleteJob(job.id)}
+                      className="text-red-600 hover:text-red-800 ml-2"
+                    >
+                      <FiTrash2 size={16} className="inline mr-1" /> Delete
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
