@@ -109,14 +109,10 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
-// Define the route parameters interface to match Next.js requirements
-interface RouteParams {
-  params: {
-    id: string;
-  };
-}
-
-export async function GET(request: NextRequest, { params }: RouteParams) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
@@ -218,4 +214,4 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     // Clean up the Prisma client
     await freshPrisma.$disconnect();
   }
-} 
+}
