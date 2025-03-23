@@ -109,16 +109,15 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
   return cleanedResults;
 };
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    // Get the id from params
-    const id = params.id;
+    // Extract the ID from the URL path
+    const pathParts = request.nextUrl.pathname.split('/');
+    const id = pathParts[pathParts.length - 2]; // Get the ID from the URL path
+    
     console.log(`Download requested for job ID: ${id}`);
     
     // Check authentication
