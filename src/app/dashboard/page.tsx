@@ -69,6 +69,16 @@ function DashboardContent() {
   const refreshJobs = async () => {
     setLoading(true);
     try {
+      // First try to import and reload from database
+      try {
+        const { loadJobsFromDatabase } = await import('@/lib/hardcodedJobs');
+        console.log('Reloading jobs from database...');
+        await loadJobsFromDatabase();
+      } catch (dbError) {
+        console.error('Error reloading from database:', dbError);
+        // Continue with API call even if database reload fails
+      }
+
       const response = await fetch('/api/jobs');
       if (!response.ok) {
         throw new Error(`Failed to fetch jobs: ${response.status}`);
@@ -99,6 +109,8 @@ function DashboardContent() {
         // Import and call loadJobsFromDatabase when component mounts
         const { loadJobsFromDatabase } = await import('@/lib/hardcodedJobs');
         await loadJobsFromDatabase();
+        
+        // Then fetch jobs from API
         refreshJobs(); // Use the refreshJobs function to load jobs initially
       } catch (error) {
         console.error('Error loading jobs in dashboard:', error);

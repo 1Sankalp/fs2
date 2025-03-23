@@ -356,6 +356,22 @@ export function logAllJobs() {
   });
 }
 
+// Separate function to clear only the in-memory store without affecting the database
+// This should NOT be called during normal operations - only used for debugging
+export function clearMemoryButNotDb() {
+  console.log(`WARNING: Clearing in-memory job store while preserving database records`);
+  jobsMap.clear();
+  
+  // Also clear localStorage if available
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('hardcodedJobs');
+    console.log('Cleared hardcodedJobs from localStorage');
+  }
+  
+  console.log(`In-memory store cleared. Will reload from database on next operation`);
+  return true;
+}
+
 // Function to sync in-memory job progress to database
 // Call this periodically to ensure job progress is saved to DB
 export async function syncJobToDatabase(jobId: string) {
