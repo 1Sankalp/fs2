@@ -1,163 +1,172 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
-import { prismaClientSingleton } from '../../../lib/prisma';
+import { authOptions } from '@/lib/auth';
+import { prismaClientSingleton } from '@/lib/prisma';
 import axios from 'axios';
 import { startEmailScraping } from '../../../lib/scraper';
 import { v4 as uuidv4 } from 'uuid';
-import { hardcodedJobs, getJobById, deleteJob, syncJobToDatabase } from '@/lib/hardcodedJobs';
+import { hardcodedJobs, getJobById, deleteJob, syncJobToDatabase, loadJobsFromDatabase } from '@/lib/hardcodedJobs';
 import * as cheerio from 'cheerio';
 import { hash } from 'bcrypt';
+import { PrismaClient } from '@prisma/client';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: NextRequest) {
-  let prisma = null;
+  let prismaClient: PrismaClient | null = null;
   
   try {
-    // Check authentication first, before creating any DB connections
+    // Check authentication first
     const session = await getServerSession(authOptions);
     if (!session) {
-      console.log('GET /api/jobs - No session found - user not authenticated');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    // Get user ID
+    
     const userId = session.user.id;
-    console.log(`GET /api/jobs - User ID from session: ${userId}`);
     
-    // Print info about in-memory jobs for debugging
-    console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size()}`);
-    hardcodedJobs.values().forEach((job) => {
-      console.log(`Memory job: ${job.id} - User: ${job.userId} - Status: ${job.status}`);
-    });
-    
-    // For hardcoded users, try to access the database but also include in-memory jobs
-    if (userId.startsWith('hardcoded-')) {
-      console.log(`GET /api/jobs - Getting jobs for hardcoded user from memory and DB: ${userId}`);
+    // Wrap database operations in a try-catch for more resilient operation
+    try {
+      // Create a fresh Prisma client for this request
+      prismaClient = prismaClientSingleton();
       
-      // Get all jobs for this user from the in-memory store
-      const memoryJobs: any[] = [];
-      
-      // Use values() and filter instead of forEach
-      hardcodedJobs.values().forEach((job) => {
-        if (job.userId === userId) {
-          console.log(`Found in-memory job ${job.id} for user ${userId}`);
-          memoryJobs.push({
+      // First, check if we need to sync in-memory store with database
+      if (userId.startsWith('hardcoded-')) {
+        // Try to load latest database state into memory
+        try {
+          await loadJobsFromDatabase();
+        } catch (loadError) {
+          console.error('Failed to load jobs from database:', loadError);
+          // Continue - we'll use what's in memory
+        }
+        
+        // Get jobs from memory store for this user
+        console.log(`Getting in-memory jobs for user ${userId}`);
+        const memoryJobs = hardcodedJobs.getJobsForUser(userId);
+        console.log(`Found ${memoryJobs.length} jobs in memory for user ${userId}`);
+        
+        // Format in-memory jobs to match expected structure
+        const formattedJobs = memoryJobs.map(job => {
+          const totalUrls = job.totalWebsites || 0;
+          const processedUrls = job.processedWebsites || 0;
+          const progress = totalUrls > 0 ? Math.floor((processedUrls / totalUrls) * 100) : 0;
+          
+          return {
             id: job.id,
             name: job.name,
             status: job.status,
-            sheetUrl: job.sheetUrl || 'https://docs.google.com/spreadsheets/d/example',
-            columnName: job.columnName || 'Website',
+            sheetUrl: job.sheetUrl,
+            columnName: job.columnName,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+            totalUrls: totalUrls,
+            processedUrls: processedUrls,
+            progress: progress,
+          };
+        });
+        
+        console.log(`Returning ${formattedJobs.length} combined jobs for user ${userId}`);
+        return NextResponse.json({ jobs: formattedJobs });
+      }
+      
+      // For real users, get jobs from database
+      let retryCount = 0;
+      const MAX_RETRIES = 3;
+      
+      while (retryCount < MAX_RETRIES) {
+        try {
+          // Query database for jobs
+          const dbJobs = await prismaClient.job.findMany({
+            where: { userId },
+            orderBy: { updatedAt: 'desc' },
+          });
+          
+          console.log(`Found ${dbJobs.length} jobs in database for user ${userId}`);
+          
+          // Query counts separately to avoid performance issues
+          const jobsWithCounts = await Promise.all(
+            dbJobs.map(async (job) => {
+              try {
+                const resultCount = await prismaClient!.result.count({
+                  where: { jobId: job.id }
+                });
+                
+                return {
+                  ...job,
+                  processedUrls: resultCount,
+                  totalUrls: job.totalUrls || 0,
+                  progress: job.totalUrls ? Math.floor((resultCount / job.totalUrls) * 100) : 0
+                };
+              } catch (countError) {
+                console.error(`Error counting results for job ${job.id}:`, countError);
+                // Return job without count information if we can't get it
+                return {
+                  ...job,
+                  processedUrls: 0,
+                  totalUrls: job.totalUrls || 0,
+                  progress: 0
+                };
+              }
+            })
+          );
+          
+          return NextResponse.json({ jobs: jobsWithCounts });
+        } catch (dbError) {
+          retryCount++;
+          console.error(`Database error fetching jobs (attempt ${retryCount}/${MAX_RETRIES}):`, dbError);
+          
+          if (retryCount >= MAX_RETRIES) {
+            throw dbError; // Let outer handler catch it
+          }
+          
+          // Add exponential backoff delay between retries
+          const delay = Math.pow(2, retryCount) * 300; // 600ms, 1200ms, 2400ms
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    } catch (error) {
+      console.error('Database error in GET /api/jobs:', error);
+      
+      // For hardcoded users, try to return memory data even if database fails
+      if (userId.startsWith('hardcoded-')) {
+        const memoryJobs = hardcodedJobs.getJobsForUser(userId);
+        
+        if (memoryJobs.length > 0) {
+          console.log(`Returning ${memoryJobs.length} memory-only jobs due to database failure`);
+          
+          const formattedJobs = memoryJobs.map(job => ({
+            id: job.id,
+            name: job.name,
+            status: job.status,
+            sheetUrl: job.sheetUrl,
+            columnName: job.columnName,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
             totalUrls: job.totalWebsites || 0,
             processedUrls: job.processedWebsites || 0,
             progress: job.progress || 0,
-            createdAt: job.createdAt,
-            updatedAt: job.updatedAt,
-            userId: userId
+          }));
+          
+          return NextResponse.json({ 
+            jobs: formattedJobs,
+            notice: 'Using memory-only data due to database error'
           });
-        } else {
-          console.log(`Skipping job ${job.id} as it belongs to user ${job.userId}, not ${userId}`);
-        }
-      });
-      
-      console.log(`Found ${memoryJobs.length} in-memory jobs for user ${userId}`);
-      
-      // Try to get database jobs as well - create a fresh client for each user request
-      let dbJobs: any[] = [];
-      try {
-        // Create a completely fresh Prisma client for each hardcoded user
-        prisma = prismaClientSingleton();
-        console.log(`Created fresh database connection for user ${userId}`);
-        
-        // Fetch jobs from database with explicit userId filter
-        dbJobs = await prisma.job.findMany({
-          where: {
-            userId: {
-              equals: userId
-            }
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        });
-        
-        console.log(`Found ${dbJobs.length} database jobs for user ${userId}`);
-        if (dbJobs.length > 0) {
-          dbJobs.forEach(job => {
-            console.log(`DB job: ${job.id} - User: ${job.userId} - Status: ${job.status}`);
-          });
-        }
-      } catch (dbError) {
-        console.error(`Database query error for hardcoded user ${userId}:`, dbError);
-        // Proceed with memory jobs only
-      } finally {
-        // Always disconnect the client to prevent connection pool issues
-        if (prisma) {
-          await prisma.$disconnect();
-          prisma = null;
         }
       }
       
-      // Combine database and memory jobs, prioritizing memory jobs for same IDs
-      const allJobs = [...dbJobs];
-      
-      // Add memory jobs that don't exist in DB
-      for (const memJob of memoryJobs) {
-        if (!allJobs.some(job => job.id === memJob.id)) {
-          allJobs.push(memJob);
-        } else {
-          // Update the DB job with memory job properties that might be more up-to-date
-          const dbJobIndex = allJobs.findIndex(job => job.id === memJob.id);
-          if (dbJobIndex !== -1) {
-            // Ensure we maintain a consistent property naming convention
-            allJobs[dbJobIndex] = {
-              ...allJobs[dbJobIndex],
-              status: memJob.status,
-              progress: memJob.progress || 0,
-              processedUrls: memJob.processedUrls || 0,
-              updatedAt: memJob.updatedAt
-            };
-          }
-        }
-      }
-      
-      // Sort by createdAt descending (newest first)
-      allJobs.sort((a, b) => {
-        const dateA = new Date(a.createdAt).getTime();
-        const dateB = new Date(b.createdAt).getTime();
-        return dateB - dateA;
-      });
-      
-      console.log(`Returning ${allJobs.length} combined jobs for user ${userId}`);
-      return NextResponse.json({ jobs: allJobs });
+      // If all else fails, return an error
+      return NextResponse.json({ 
+        error: 'Error fetching jobs',
+        details: error instanceof Error ? error.message : 'Unknown database error'
+      }, { status: 500 });
     }
-    
-    // For real users, create a fresh client for database access
-    console.log(`GET /api/jobs - Fetching jobs from database for user: ${userId}`);
-    prisma = prismaClientSingleton();
-    
-    // Fetch jobs from database
-    const jobs = await prisma.job.findMany({
-      where: {
-        userId: userId,
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
-
-    console.log(`Found ${jobs.length} database jobs for user ${userId}`);
-    return NextResponse.json({ jobs });
   } catch (error) {
-    console.error('Get jobs error:', error);
-    return NextResponse.json(
-      { error: 'Failed to get jobs' },
-      { status: 500 }
-    );
+    console.error('Critical error in GET /api/jobs:', error);
+    return NextResponse.json({ 
+      error: 'Failed to fetch jobs',
+      details: error instanceof Error ? error.message : 'Unknown server error'
+    }, { status: 500 });
   } finally {
-    // Clean up the Prisma client
-    if (prisma) {
-      await prisma.$disconnect();
+    if (prismaClient) {
+      await prismaClient.$disconnect().catch(console.error);
     }
   }
 }
