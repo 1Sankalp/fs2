@@ -6,13 +6,13 @@ import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
 export async function GET(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    const id = context.params.id;
+    const id = params.id;
     console.log(`Getting job details for job ID: ${id}`);
 
     // Check authentication
@@ -101,13 +101,13 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    const id = context.params.id;
+    const id = params.id;
     console.log(`Deleting job ID: ${id}`);
 
     // Check authentication
