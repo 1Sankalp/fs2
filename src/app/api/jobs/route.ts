@@ -105,6 +105,19 @@ export async function GET(request: NextRequest) {
       for (const memJob of memoryJobs) {
         if (!allJobs.some(job => job.id === memJob.id)) {
           allJobs.push(memJob);
+        } else {
+          // Update the DB job with memory job properties that might be more up-to-date
+          const dbJobIndex = allJobs.findIndex(job => job.id === memJob.id);
+          if (dbJobIndex !== -1) {
+            // Ensure we maintain a consistent property naming convention
+            allJobs[dbJobIndex] = {
+              ...allJobs[dbJobIndex],
+              status: memJob.status,
+              progress: memJob.progress || 0,
+              processedUrls: memJob.processedUrls || 0,
+              updatedAt: memJob.updatedAt
+            };
+          }
         }
       }
       

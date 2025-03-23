@@ -160,72 +160,49 @@ export default function JobResults({ params }: { params: Promise<{ id: string }>
 
   // Fetch job results
   useEffect(() => {
-    if (session && jobId) {
-      const fetchJobResults = async (retryCount = 0, maxRetries = 2) => {
-        try {
+    async function loadJobData() {
+      if (!jobId) return;
+      
+      setIsLoading(true);
+      setError('');
+      
+      try {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load job: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        if (!data.job) {
+          throw new Error('Invalid job data received');
+        }
+        
+        // Normalize the job data to handle both database and memory formats
+        const normalizedJob = {
+          ...data.job,
+          totalUrls: data.job.totalUrls || data.job.totalWebsites || 0,
+          processedUrls: data.job.processedUrls || data.job.processedWebsites || 0,
+          progress: data.job.progress || 0,
+          results: data.job.results || []
+        };
+        
+        setJobData(normalizedJob);
+        console.log('Job data loaded:', normalizedJob);
+        
+        // Start polling for updates if job is in progress
+        if (normalizedJob.status === 'processing' || normalizedJob.status === 'pending') {
           setIsLoading(true);
-          
-          // Add a unique timestamp to prevent browser caching
-          const timestamp = new Date().getTime();
-          console.log(`Fetching job ${jobId} results, attempt ${retryCount + 1}, ts=${timestamp}`);
-          
-          const response = await fetch(`/api/jobs/${jobId}?_=${timestamp}`, {
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache',
-              'Expires': '0'
-            }
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to fetch job results');
-          }
-          
-          const data = await response.json();
-          console.log('Fetched job data:', data);
-
-          if (data.job) {
-            setJobData(data.job);
-          } else {
-            console.error('No job data in response');
-            throw new Error('Invalid job data returned from server');
-          }
-          
-          if (Array.isArray(data.results)) {
-            console.log(`Received ${data.results.length} results for job ${jobId}`);
-            setResults(data.results);
-          } else {
-            console.error('No results array in response');
-            setResults([]);
-          }
-        } catch (error) {
-          console.error('Error fetching job results:', error);
-          
-          // Retry logic
-          if (retryCount < maxRetries) {
-            console.log(`Retrying fetch for job ${jobId} (attempt ${retryCount + 1} of ${maxRetries})`);
-            
-            // Wait with exponential backoff before retrying
-            const delay = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s...
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            return fetchJobResults(retryCount + 1, maxRetries);
-          }
-          
-          if (error instanceof Error) {
-            setError(error.message);
-          } else {
-            setError('Failed to fetch job results');
-          }
-        } finally {
+        } else {
           setIsLoading(false);
         }
-      };
-
-      fetchJobResults();
+      } catch (err) {
+        console.error('Error loading job data:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load job');
+      }
     }
-  }, [session, jobId]);
+    
+    loadJobData();
+  }, [jobId]);
 
   // Clean and group emails when results change
   useEffect(() => {

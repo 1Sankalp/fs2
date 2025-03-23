@@ -232,7 +232,7 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
     );
   }
 
-  if (jobs.length === 0) {
+  if (!jobs || jobs.length === 0) {
     return (
       <div className="p-8 text-center">
         <div className="flex justify-center mb-3 text-slate-400">
@@ -251,18 +251,18 @@ const JobsList = ({ jobs, loading, error }: { jobs: any[], loading: boolean, err
           <Link href={`/dashboard/results/${job.id}`} className="block">
             <div className="flex justify-between items-center">
               <div>
-                <h3 className="font-medium text-slate-800">{job.name}</h3>
+                <h3 className="font-medium text-slate-800">{job.name || 'Unnamed Job'}</h3>
                 <div className="text-sm text-slate-500 mt-1 flex items-center">
                   <FiCalendar className="mr-1" size={14} />
                   <span>{new Date(job.createdAt).toLocaleDateString()}</span>
                   <span className="mx-2">•</span>
-                  <StatusBadge status={job.status} />
+                  <StatusBadge status={job.status || 'pending'} />
                 </div>
               </div>
               <div className="flex items-center">
                 <div className="text-right mr-4">
                   <div className="text-sm font-medium text-slate-700">
-                    {job.processedUrls || 0}/{job.totalUrls || 0} processed
+                    {(job.processedUrls || job.processedWebsites || 0)}/{(job.totalUrls || job.totalWebsites || 0)} processed
                   </div>
                   <div className="w-24 bg-slate-200 rounded-full h-2 mt-1">
                     <div
