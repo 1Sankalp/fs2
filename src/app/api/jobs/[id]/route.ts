@@ -36,31 +36,33 @@ export async function GET(request: NextRequest) {
         const job = hardcodedJobs.get(id);
         
         // Check if this job belongs to this user
-        if (job.userId !== userId) {
+        if (job && job.userId !== userId) {
           console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
           return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
 
-        const totalWebsites = job.totalWebsites || 0;
-        const processedWebsites = job.processedWebsites || 0;
-        const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
+        if (job) {
+          const totalWebsites = job.totalWebsites || 0;
+          const processedWebsites = job.processedWebsites || 0;
+          const progress = totalWebsites > 0 ? Math.min(100, Math.floor((processedWebsites / totalWebsites) * 100)) : 0;
 
-        return NextResponse.json({
-          job: {
-            id: job.id,
-            name: job.name,
-            status: job.status,
-            sheetUrl: job.sheetUrl,
-            columnName: job.columnName,
-            createdAt: job.createdAt,
-            updatedAt: job.updatedAt,
-            progress: progress,
-            totalUrls: totalWebsites,
-            processedUrls: processedWebsites,
-            userId: job.userId
-          },
-          results: job.results || []
-        });
+          return NextResponse.json({
+            job: {
+              id: job.id,
+              name: job.name,
+              status: job.status,
+              sheetUrl: job.sheetUrl,
+              columnName: job.columnName,
+              createdAt: job.createdAt,
+              updatedAt: job.updatedAt,
+              progress: progress,
+              totalUrls: totalWebsites,
+              processedUrls: processedWebsites,
+              userId: job.userId
+            },
+            results: job.results || []
+          });
+        }
       } else {
         console.log(`Job ${id} not found in memory store for user ${userId}`);
       }
@@ -160,46 +162,48 @@ export async function DELETE(request: NextRequest) {
         const job = hardcodedJobs.get(id);
         
         // Check if this job belongs to this user
-        if (job.userId !== userId) {
+        if (job && job.userId !== userId) {
           console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
           return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
         }
         
-        console.log(`Deleting job ${id} from memory store`);
-        hardcodedJobs.delete(id);
-        
-        // Also try to delete from database if it exists there
-        try {
-          freshPrisma = prismaClientSingleton();
+        if (job) {
+          console.log(`Deleting job ${id} from memory store`);
+          hardcodedJobs.delete(id);
           
-          // Check if job exists in database
-          const dbJob = await freshPrisma.job.findUnique({
-            where: { id },
-          });
-          
-          if (dbJob && dbJob.userId === userId) {
-            // Delete results first
-            await freshPrisma.result.deleteMany({
-              where: { jobId: id },
-            });
+          // Also try to delete from database if it exists there
+          try {
+            freshPrisma = prismaClientSingleton();
             
-            // Then delete the job
-            await freshPrisma.job.delete({
+            // Check if job exists in database
+            const dbJob = await freshPrisma.job.findUnique({
               where: { id },
             });
-            console.log(`Also deleted job ${id} from database`);
+            
+            if (dbJob && dbJob.userId === userId) {
+              // Delete results first
+              await freshPrisma.result.deleteMany({
+                where: { jobId: id },
+              });
+              
+              // Then delete the job
+              await freshPrisma.job.delete({
+                where: { id },
+              });
+              console.log(`Also deleted job ${id} from database`);
+            }
+          } catch (dbError) {
+            // Log but don't fail if database deletion fails
+            console.error(`Failed to delete job ${id} from database:`, dbError);
+          } finally {
+            if (freshPrisma) {
+              await freshPrisma.$disconnect();
+              freshPrisma = null;
+            }
           }
-        } catch (dbError) {
-          // Log but don't fail if database deletion fails
-          console.error(`Failed to delete job ${id} from database:`, dbError);
-        } finally {
-          if (freshPrisma) {
-            await freshPrisma.$disconnect();
-            freshPrisma = null;
-          }
+          
+          return NextResponse.json({ success: true });
         }
-        
-        return NextResponse.json({ success: true });
       } else {
         console.log(`Job ${id} not found in memory store for user ${userId}`);
       }
