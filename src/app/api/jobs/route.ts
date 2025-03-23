@@ -260,16 +260,9 @@ export async function POST(request: NextRequest) {
             console.log(`User ${userEmail} (${existingUser.id}) already exists in database`);
           }
           
-          // Double check user exists before creating the job
-          const verifyUser = await prisma.user.findUnique({
-            where: { id: userId },
-          });
-          
-          if (!verifyUser) {
-            throw new Error(`User ${userId} not found in database after creation attempt`);
-          }
-          
-          console.log(`Verified user ${userId} exists in database, creating job`);
+          // Use the actual user ID from the database for the job
+          const actualUserId = existingUser ? existingUser.id : userId;
+          console.log(`Using actual user ID for job creation: ${actualUserId}`);
           
           // Now create the job
           const dbJob = await prisma.job.create({
@@ -279,12 +272,12 @@ export async function POST(request: NextRequest) {
               columnName,
               status: 'pending',
               totalUrls: urls.length,
-              userId: userId, // Already contains hardcoded-username
+              userId: actualUserId, // Use the actual ID from database
               name: jobName || `${columnName} extraction`,
             },
           });
           
-          console.log(`Created database job for hardcoded user: ${dbJob.id} with user ID: ${userId}`);
+          console.log(`Created database job for hardcoded user: ${dbJob.id} with user ID: ${actualUserId}`);
           
           // Now also store in memory for real-time processing
           const newJob = {
@@ -299,12 +292,12 @@ export async function POST(request: NextRequest) {
             results: [],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            userId: userId
+            userId: actualUserId
           };
           
           // Store in memory
           hardcodedJobs.set(jobId, newJob);
-          console.log(`Stored job ${jobId} in memory for user ${userId}`);
+          console.log(`Stored job ${jobId} in memory for user ${actualUserId}`);
           
           // Start processing in background
           setTimeout(() => {
@@ -330,6 +323,7 @@ export async function POST(request: NextRequest) {
           console.error('Error saving hardcoded job to database:', dbError);
           
           // Fall back to memory-only if database fails
+          const actualUserId = userId; // Use original userId for memory storage in fallback case
           const newJob = {
             id: jobId,
             name: jobName || `${columnName} extraction`,
@@ -342,12 +336,12 @@ export async function POST(request: NextRequest) {
             results: [],
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            userId: userId
+            userId: actualUserId
           };
           
           // Store in memory only
           hardcodedJobs.set(jobId, newJob);
-          console.log(`Stored job ${jobId} in memory ONLY for user ${userId} (database save failed)`);
+          console.log(`Stored job ${jobId} in memory ONLY for user ${actualUserId} (database save failed)`);
           
           // Start processing in background
           setTimeout(() => {
