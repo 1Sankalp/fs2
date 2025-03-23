@@ -63,8 +63,8 @@ export default function ScraperForm({ onSuccess }: ScraperFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sheetUrl || !columnName || !jobName) {
-      setError('Please fill out all required fields');
+    if (!sheetUrl || !columnName) {
+      setError('Please provide a Google Sheet URL and select a column');
       return;
     }
     
@@ -80,7 +80,7 @@ export default function ScraperForm({ onSuccess }: ScraperFormProps) {
         body: JSON.stringify({
           sheetUrl,
           columnName,
-          name: jobName,
+          jobName: jobName || `${columnName} extraction`,
         }),
       });
       
@@ -97,7 +97,7 @@ export default function ScraperForm({ onSuccess }: ScraperFormProps) {
         onSuccess();
       } else {
         // Default behavior if no callback provided
-        router.push(`/dashboard/results/${data.id}`);
+        router.push(`/dashboard/results/${data.job.id}`);
       }
     } catch (error) {
       console.error('Error creating job:', error);

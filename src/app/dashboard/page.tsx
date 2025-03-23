@@ -58,9 +58,12 @@ function DashboardContent() {
       setLoading(true);
       try {
         const response = await fetch('/api/jobs');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch jobs: ${response.status}`);
+        }
         const data = await response.json();
         console.log('Fetched jobs:', data);
-        setJobs(data || []);
+        setJobs(data.jobs || []);
       } catch (error) {
         console.error('Error fetching jobs:', error);
         setError('Failed to load jobs. Please try again.');

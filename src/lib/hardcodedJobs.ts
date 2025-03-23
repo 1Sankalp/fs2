@@ -178,28 +178,49 @@ export const initializeHardcodedJobs = () => {
   syncWithDatabase();
 };
 
+// Export a more predictable typed API
 export const hardcodedJobs = {
   set: (id: string, job: HardcodedJob) => {
     jobsMap.set(id, job);
     saveToStorage();
   },
-  get: (id: string) => jobsMap.get(id),
-  has: (id: string) => jobsMap.has(id),
+  get: (id: string) => {
+    return jobsMap.get(id);
+  },
+  has: (id: string) => {
+    return jobsMap.has(id);
+  },
   delete: (id: string) => {
-    const result = jobsMap.delete(id);
+    const deleted = jobsMap.delete(id);
     saveToStorage();
-    return result;
+    return deleted;
   },
   clear: () => {
     jobsMap.clear();
     saveToStorage();
   },
-  values: () => Array.from(jobsMap.values()),
+  size: () => {
+    // Handle case where jobsMap might be undefined on client side
+    if (typeof jobsMap === 'undefined' || jobsMap === null) {
+      return 0;
+    }
+    return jobsMap.size;
+  },
+  values: () => {
+    // Ensure jobsMap exists before trying to access it
+    if (typeof jobsMap === 'undefined' || jobsMap === null) {
+      return [];
+    }
+    return Array.from(jobsMap.values());
+  },
   getJobsForUser: (userId: string) => {
+    // Ensure jobsMap exists before trying to access it
+    if (typeof jobsMap === 'undefined' || jobsMap === null) {
+      return [];
+    }
     return Array.from(jobsMap.values()).filter(job => job.userId === userId);
   },
   generateJobId: () => uuidv4(),
-  size: () => jobsMap.size
 };
 
 // Debug function to print all in-memory jobs

@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
 
     // Get the user ID
     const userId = session.user.id;
-    console.log('Creating job for user:', userId);
+    console.log('Creating job for user:', userId, 'with name:', jobName);
 
     // Extract the sheet ID from the URL
     const sheetIdMatch = sheetUrl.match(/\/d\/([^/]+)/);
