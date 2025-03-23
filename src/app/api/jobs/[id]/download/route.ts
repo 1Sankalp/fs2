@@ -111,14 +111,14 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
     // Get the id from params
-    const id = params.id;
+    const id = context.params.id;
     console.log(`Download requested for job ID: ${id}`);
     
     // Check authentication

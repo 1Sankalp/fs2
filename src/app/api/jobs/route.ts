@@ -6,7 +6,7 @@ import axios from 'axios';
 import { startEmailScraping } from '../../../lib/scraper';
 import { v4 as uuidv4 } from 'uuid';
 import { hardcodedJobs } from '../../../lib/hardcodedJobs';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: NextRequest) {
