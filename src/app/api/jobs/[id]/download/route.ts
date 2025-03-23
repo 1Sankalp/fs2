@@ -85,14 +85,16 @@ export async function GET(request: NextRequest) {
       const job = hardcodedJobs.get(id);
       
       // Check if this job belongs to this user
-      if (job.userId !== userId) {
+      if (job && job.userId !== userId) {
         console.log(`Job ${id} belongs to ${job.userId}, not current user ${userId}`);
         return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
       }
       
-      console.log(`Found in-memory job ${id} with ${job.results?.length || 0} results`);
-      results = job.results || [];
-      jobName = job.name || 'job-export';
+      if (job) {
+        console.log(`Found in-memory job ${id} with ${job.results?.length || 0} results`);
+        results = job.results || [];
+        jobName = job.name || 'job-export';
+      }
     }
     
     // If results are empty, try to fetch from database
