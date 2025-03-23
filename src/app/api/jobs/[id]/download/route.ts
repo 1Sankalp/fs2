@@ -111,24 +111,20 @@ const groupAndCleanEmails = (results: { website: string, email: string | null }[
 
 export async function GET(
   request: NextRequest,
-  context: any
+  { params }: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
     // Get the id from params
-    const id = context.params.id;
+    const id = params.id;
     console.log(`Download requested for job ID: ${id}`);
     
     // Check authentication
     const session = await getServerSession(authOptions);
     if (!session) {
       return new Response('Unauthorized', { status: 401 });
-    }
-
-    if (!id) {
-      return new Response('Job ID is required', { status: 400 });
     }
     
     // Get user ID
@@ -161,39 +157,9 @@ export async function GET(
           headers,
         });
       }
-      
-      // If not in memory store but is a demo job, return mock data
-      if (id.startsWith('demo-')) {
-        console.log(`Generating mock CSV for demo job ${id}`);
-        // Generate mock results for CSV
-        const mockResults = [
-          { website: 'example.com', email: 'contact@example.com' },
-          { website: 'demo-site.com', email: 'info@demo-site.com' },
-          { website: 'test-company.com', email: 'hello@test-company.com' },
-          { website: 'acme.org', email: 'support@acme.org' },
-          { website: 'business.net', email: 'sales@business.net' }
-        ];
-        
-        // Generate CSV
-        let csv = 'Website,Email\n';
-        mockResults.forEach((result) => {
-          csv += `"${result.website}","${result.email || ''}"\n`;
-        });
-
-        const headers = new Headers();
-        headers.append('Content-Type', 'text/csv');
-        headers.append(
-          'Content-Disposition',
-          `attachment; filename="emails-${id}.csv"`
-        );
-
-        return new Response(csv, {
-          headers,
-        });
-      }
     }
 
-    // Standard flow for real users with database access
+    // Standard flow for all users with database access
     console.log(`Fetching job ${id} from database`);
     try {
       // Fetch the job

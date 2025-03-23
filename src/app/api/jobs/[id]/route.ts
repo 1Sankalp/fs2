@@ -45,34 +45,9 @@ export async function GET(
           results: job.results || []
         });
       }
-
-      // If not in memory but is a demo job, return demo data
-      if (id.startsWith('demo-')) {
-        console.log(`Generating mock data for demo job ${id}`);
-        // Generate a mock job with details
-        const mockJob = {
-          id,
-          name: 'Demo Google Sheet',
-          status: 'completed',
-          createdAt: new Date(Date.now() - 3600000).toISOString(),
-          updatedAt: new Date().toISOString(),
-          progress: 100,
-          totalWebsites: 5,
-          processedWebsites: 5,
-          results: [
-            { website: 'example.com', email: 'contact@example.com' },
-            { website: 'demo-site.com', email: 'info@demo-site.com' },
-            { website: 'test-company.com', email: 'hello@test-company.com' },
-            { website: 'acme.org', email: 'support@acme.org' },
-            { website: 'business.net', email: 'sales@business.net' }
-          ]
-        };
-        
-        return NextResponse.json(mockJob);
-      }
     }
 
-    // Standard database access for real users or non-demo jobs
+    // Standard database access for all users
     console.log(`Fetching job ${id} from database`);
     
     try {
@@ -154,14 +129,9 @@ export async function DELETE(
         hardcodedJobs.delete(id);
         return NextResponse.json({ success: true });
       }
-      
-      // For demo jobs, just return success (nothing to delete)
-      if (id.startsWith('demo-')) {
-        return NextResponse.json({ success: true });
-      }
     }
 
-    // For real users and database jobs
+    // For all users, try database access
     console.log(`Attempting to delete job ${id} from database`);
     
     try {

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { prismaClientSingleton } from '../../../lib/prisma';
@@ -6,36 +6,36 @@ import axios from 'axios';
 import { startEmailScraping } from '../../../lib/scraper';
 import { v4 as uuidv4 } from 'uuid';
 import { hardcodedJobs } from '../../../lib/hardcodedJobs';
+import cheerio from 'cheerio';
 
 // GET /api/jobs - Get all jobs for the current user
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   let prisma = null;
   
   try {
     // Check authentication first, before creating any DB connections
     const session = await getServerSession(authOptions);
     if (!session) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Get user ID
     const userId = session.user.id;
     console.log(`Getting jobs for user ID: ${userId}`);
     
-    // For hardcoded users, don't try to access the database at all
-    // Return in-memory jobs + mock jobs
+    // For hardcoded users, try to access the database but also include in-memory jobs
     if (userId.startsWith('hardcoded-')) {
-      console.log('Returning in-memory + mock jobs for hardcoded user:', userId);
+      console.log('Getting jobs for hardcoded user from memory and DB:', userId);
       
       // Get all jobs for this user from the in-memory store
-      const userJobs: any[] = [];
+      const memoryJobs: any[] = [];
       hardcodedJobs.forEach((job, key) => {
         if (job.userId === userId) {
-          userJobs.push({
+          memoryJobs.push({
             id: job.id,
             name: job.name,
             status: job.status,
-            sheetUrl: job.sheetUrl || 'https://docs.google.com/spreadsheets/d/mock',
+            sheetUrl: job.sheetUrl || 'https://docs.google.com/spreadsheets/d/example',
             columnName: job.columnName || 'Website',
             totalUrls: job.totalWebsites || 0,
             processedUrls: job.processedWebsites || 0,
@@ -47,25 +47,45 @@ export async function GET(request: Request) {
         }
       });
       
-      // If no in-memory jobs exist, add a demo job
-      if (userJobs.length === 0) {
-        const username = userId.replace('hardcoded-', '');
-        userJobs.push({
-          id: `demo-${username}-1`,
-          name: `Demo for ${username}`,
-          sheetUrl: 'https://docs.google.com/spreadsheets/d/mock',
-          columnName: 'Website',
-          status: 'completed',
-          totalUrls: 5,
-          processedUrls: 5,
-          progress: 100,
-          createdAt: new Date(Date.now() - 86400000), // 1 day ago
-          updatedAt: new Date(Date.now() - 3600000),  // 1 hour ago
-          userId: userId
+      // Try to get database jobs as well
+      let dbJobs: any[] = [];
+      try {
+        // Create a fresh Prisma client for database access
+        prisma = prismaClientSingleton();
+        
+        // Fetch jobs from database
+        dbJobs = await prisma.job.findMany({
+          where: {
+            userId: userId,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
         });
+        
+      } catch (dbError) {
+        console.error('Database query error for hardcoded user:', dbError);
+        // Continue with just memory jobs, don't fail the request
       }
       
-      return NextResponse.json({ jobs: userJobs });
+      // Combine database and memory jobs, prioritizing memory jobs for same IDs
+      const allJobs = [...dbJobs];
+      
+      // Add memory jobs that don't exist in DB
+      for (const memJob of memoryJobs) {
+        if (!allJobs.some(job => job.id === memJob.id)) {
+          allJobs.push(memJob);
+        }
+      }
+      
+      // Sort by createdAt descending (newest first)
+      allJobs.sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+      
+      return NextResponse.json({ jobs: allJobs });
     }
     
     // For real users, create a fresh client for database access
@@ -84,9 +104,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ jobs });
   } catch (error) {
-    console.error('Database query error:', error);
+    console.error('Get jobs error:', error);
     return NextResponse.json(
-      { message: 'Database query failed', error: String(error) },
+      { error: 'Failed to get jobs' },
       { status: 500 }
     );
   } finally {
@@ -98,14 +118,14 @@ export async function GET(request: Request) {
 }
 
 // POST /api/jobs - Create a new job
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   let prisma = null;
   
   try {
     // Check authentication first, before creating any DB connections
     const session = await getServerSession(authOptions);
     if (!session) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     // Parse request body
@@ -115,7 +135,7 @@ export async function POST(request: Request) {
     // Validate inputs
     if (!sheetUrl || !columnName) {
       return NextResponse.json(
-        { message: 'Sheet URL and column name are required' },
+        { error: 'Sheet URL and column name are required' },
         { status: 400 }
       );
     }
@@ -124,56 +144,55 @@ export async function POST(request: Request) {
     const userId = session.user.id;
     console.log('Creating job for user:', userId);
 
-    // For hardcoded users, we don't actually create jobs in the database
-    // Instead we create a real job in memory and do the scraping
-    if (userId.startsWith('hardcoded-')) {
-      console.log('Creating in-memory job for hardcoded user');
-      
-      // Extract the sheet ID from the URL
-      const sheetIdMatch = sheetUrl.match(/\/d\/([^/]+)/);
-      if (!sheetIdMatch || !sheetIdMatch[1]) {
-        return NextResponse.json({ message: 'Invalid Google Sheet URL' }, { status: 400 });
+    // Extract the sheet ID from the URL
+    const sheetIdMatch = sheetUrl.match(/\/d\/([^/]+)/);
+    if (!sheetIdMatch || !sheetIdMatch[1]) {
+      return NextResponse.json({ error: 'Invalid Google Sheet URL' }, { status: 400 });
+    }
+    const sheetId = sheetIdMatch[1];
+
+    try {
+      // Get the CSV export URL
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+
+      // Fetch the CSV data
+      const response = await axios.get(csvUrl, { timeout: 10000 });
+      const csvData = response.data;
+
+      // Parse the CSV data using the existing functions
+      const { headers, rows } = parseCSV(csvData);
+
+      // Ensure the specified column exists
+      if (!headers.includes(columnName)) {
+        return NextResponse.json(
+          { error: `Column "${columnName}" not found in sheet` },
+          { status: 400 }
+        );
       }
-      const sheetId = sheetIdMatch[1];
 
-      try {
-        // Get the CSV export URL
-        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+      // Extract URLs from the specified column
+      const urls = rows
+        .map((row) => row[columnName])
+        .filter((url) => url && url.trim() !== '' && (
+          url.startsWith('http') || url.startsWith('www.') || 
+          !url.includes(' ') // Accept domains without http/www
+        ));
 
-        // Fetch the CSV data
-        const response = await axios.get(csvUrl, { timeout: 10000 });
-        const csvData = response.data;
-
-        // Parse the CSV data using the existing functions
-        const { headers, rows } = parseCSV(csvData);
-
-        // Ensure the specified column exists
-        if (!headers.includes(columnName)) {
-          return NextResponse.json(
-            { message: `Column "${columnName}" not found in sheet` },
-            { status: 400 }
-          );
-        }
-
-        // Extract URLs from the specified column
-        const urls = rows
-          .map((row) => row[columnName])
-          .filter((url) => url && url.trim() !== '' && (
-            url.startsWith('http') || url.startsWith('www.') || 
-            !url.includes(' ') // Accept domains without http/www
-          ));
-
-        if (urls.length === 0) {
-          return NextResponse.json(
-            { message: 'No valid URLs found in the specified column' },
-            { status: 400 }
-          );
-        }
+      if (urls.length === 0) {
+        return NextResponse.json(
+          { error: 'No valid URLs found in the specified column' },
+          { status: 400 }
+        );
+      }
+      
+      // For hardcoded users, use in-memory processing to avoid DB errors
+      if (userId.startsWith('hardcoded-')) {
+        console.log('Creating in-memory job for hardcoded user');
         
         // Create a real job with a unique ID
-        const realJobId = `job-${uuidv4()}`;
+        const jobId = `job-${uuidv4()}`;
         const newJob = {
-          id: realJobId,
+          id: jobId,
           name: jobName || `${columnName} extraction`,
           sheetUrl,
           columnName,
@@ -188,16 +207,16 @@ export async function POST(request: Request) {
         };
         
         // Store in memory
-        hardcodedJobs.set(realJobId, newJob);
+        hardcodedJobs.set(jobId, newJob);
         
         // Start processing in background
         setTimeout(() => {
-          processHardcodedJob(realJobId, urls);
+          processJob(jobId, urls);
         }, 100);
         
         return NextResponse.json({
           job: {
-            id: realJobId,
+            id: jobId,
             name: newJob.name,
             sheetUrl,
             columnName,
@@ -210,85 +229,45 @@ export async function POST(request: Request) {
             userId
           }
         }, { status: 201 });
-      } catch (error) {
-        console.error('Error processing sheet for hardcoded user:', error);
-        return NextResponse.json(
-          { message: 'Failed to process Google Sheet', error: String(error) },
-          { status: 500 }
-        );
       }
-    }
 
-    // For real users, continue with database operations
-    // Extract the sheet ID from the URL
-    const sheetIdMatch = sheetUrl.match(/\/d\/([^/]+)/);
-    if (!sheetIdMatch || !sheetIdMatch[1]) {
-      return NextResponse.json({ message: 'Invalid Google Sheet URL' }, { status: 400 });
-    }
-    const sheetId = sheetIdMatch[1];
+      // Create a fresh Prisma client for database operations
+      prisma = prismaClientSingleton();
+      
+      console.log(`Creating job for user ${userId} with ${urls.length} URLs`);
+      const finalJobName = jobName || `${columnName} extraction`;
+      const job = await prisma.job.create({
+        data: {
+          sheetUrl,
+          columnName,
+          status: 'pending',
+          totalUrls: urls.length,
+          userId: userId,
+          name: finalJobName,
+        },
+      });
 
-    // Get the CSV export URL
-    const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+      // Start the scraping process in the background with a copy of the job ID and URLs
+      const jobId = job.id;
+      const urlsCopy = [...urls];
+      
+      // Use setTimeout to run this after the current request is complete
+      setTimeout(() => {
+        startEmailScraping(jobId, urlsCopy);
+      }, 100);
 
-    // Fetch the CSV data
-    const response = await axios.get(csvUrl, { timeout: 10000 });
-    const csvData = response.data;
-
-    // Parse the CSV data
-    const { headers, rows } = parseCSV(csvData);
-
-    // Ensure the specified column exists
-    if (!headers.includes(columnName)) {
+      return NextResponse.json({ job }, { status: 201 });
+    } catch (error) {
+      console.error('Job creation error:', error);
       return NextResponse.json(
-        { message: `Column "${columnName}" not found in sheet` },
-        { status: 400 }
+        { error: `Failed to process sheet: ${String(error)}` },
+        { status: 500 }
       );
     }
-
-    // Extract URLs from the specified column
-    const urls = rows
-      .map((row) => row[columnName])
-      .filter((url) => url && url.trim() !== '' && (
-        url.startsWith('http') || url.startsWith('www.')
-      ));
-
-    if (urls.length === 0) {
-      return NextResponse.json(
-        { message: 'No valid URLs found in the specified column' },
-        { status: 400 }
-      );
-    }
-
-    // Create a fresh Prisma client for database operations
-    prisma = prismaClientSingleton();
-    
-    console.log(`Creating job for user ${userId} with ${urls.length} URLs`);
-    const finalJobName = jobName || `${columnName} extraction`;
-    const job = await prisma.job.create({
-      data: {
-        sheetUrl,
-        columnName,
-        status: 'pending',
-        totalUrls: urls.length,
-        userId: userId,
-        name: finalJobName,
-      },
-    });
-
-    // Start the scraping process in the background with a copy of the job ID and URLs
-    const jobId = job.id;
-    const urlsCopy = [...urls];
-    
-    // Use setTimeout to run this after the current request is complete
-    setTimeout(() => {
-      startEmailScraping(jobId, urlsCopy);
-    }, 100);
-
-    return NextResponse.json({ job }, { status: 201 });
   } catch (error) {
     console.error('Create job error:', error);
     return NextResponse.json(
-      { message: 'Failed to create job', error: String(error) },
+      { error: `Failed to create job: ${String(error)}` },
       { status: 500 }
     );
   } finally {
@@ -359,9 +338,9 @@ function parseCSVRow(row: string) {
   });
 }
 
-// Process jobs for hardcoded users without using the database
-async function processHardcodedJob(jobId: string, urls: string[]) {
-  console.log(`Processing hardcoded job ${jobId} with ${urls.length} URLs`);
+// Process jobs for hardcoded users
+async function processJob(jobId: string, urls: string[]) {
+  console.log(`Processing job ${jobId} with ${urls.length} URLs`);
   
   // Get the job from memory
   const job = hardcodedJobs.get(jobId);
@@ -425,7 +404,7 @@ async function processHardcodedJob(jobId: string, urls: string[]) {
   job.updatedAt = new Date().toISOString();
   hardcodedJobs.set(jobId, { ...job });
   
-  console.log(`Hardcoded job ${jobId} completed with ${job.results.length} results`);
+  console.log(`Job ${jobId} completed with ${job.results.length} results`);
 }
 
 // Process a website to extract emails
@@ -478,26 +457,38 @@ async function processWebsite(website: string): Promise<string | null> {
 // Helper function to extract emails from HTML content
 async function extractEmailsFromHtml(html: string, website: string): Promise<string | null> {
   try {
-    // For a demo, let's just create a predictable email based on the domain
-    const domainMatch = website.match(/([a-z0-9-]+\.[a-z0-9-]+)(\.[a-z]+)+/i);
-    if (domainMatch) {
-      const domain = domainMatch[0];
+    const $ = cheerio.load(html);
+    const bodyText = $('body').text();
+    
+    // Email regex pattern
+    const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+    const emails = bodyText.match(emailRegex) || [];
+    
+    if (emails.length > 0) {
+      // Filter out common service emails like noreply, admin, etc.
+      const filteredEmails = emails.filter(email => {
+        const lowerEmail = email.toLowerCase();
+        return !lowerEmail.includes('noreply') && 
+               !lowerEmail.includes('no-reply') && 
+               !lowerEmail.includes('donotreply') && 
+               !lowerEmail.includes('no_reply');
+      });
       
-      // Create variations based on domain patterns
-      if (domain.includes('example.com')) {
-        return 'info@example.com';
+      if (filteredEmails.length > 0) {
+        // Get most relevant email (contains 'contact', 'info', etc.)
+        const priorityEmails = filteredEmails.filter(email => {
+          const lowerEmail = email.toLowerCase();
+          return lowerEmail.includes('contact') || 
+                 lowerEmail.includes('info') || 
+                 lowerEmail.includes('hello') || 
+                 lowerEmail.includes('support');
+        });
+        
+        return priorityEmails.length > 0 ? priorityEmails[0] : filteredEmails[0];
       }
-      
-      if (domain.includes('test')) {
-        return 'hello@' + domain;
-      }
-      
-      // For random domains, create a professional-looking email
-      return 'contact@' + domain;
     }
     
-    // Default email suffix if we can't extract a domain
-    return 'contact@' + website.replace(/^https?:\/\//i, '').split('/')[0];
+    return null;
   } catch (error) {
     console.error(`Error extracting emails from ${website}:`, error);
     return null;
