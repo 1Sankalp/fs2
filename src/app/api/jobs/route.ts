@@ -8,7 +8,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { hardcodedJobs, getJobById, deleteJob, syncJobToDatabase } from '@/lib/hardcodedJobs';
 import * as cheerio from 'cheerio';
 import { hash } from 'bcrypt';
-import { uuid } from '@/lib/uuid';
 
 // GET /api/jobs - Get all jobs for the current user
 export async function GET(request: NextRequest) {
@@ -332,4 +331,80 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error('Job creation error:', error);
       return NextResponse.json(
-        { error: `
+        { error: `Failed to process sheet: ${String(error)}` },
+        { status: 500 }
+      );
+    }
+  } catch (error) {
+    console.error('Create job error:', error);
+    return NextResponse.json(
+      { error: `Failed to create job: ${String(error)}` },
+      { status: 500 }
+    );
+  } finally {
+    // Clean up the Prisma client
+    if (prisma) {
+      await prisma.$disconnect();
+    }
+  }
+}
+
+// Helper function to parse CSV
+function parseCSV(csv: string) {
+  const lines = csv.split('\n');
+  if (lines.length === 0) {
+    return { headers: [], rows: [] };
+  }
+
+  // Parse headers (first row)
+  const headers = parseCSVRow(lines[0]);
+  
+  // Parse data rows (skip header)
+  const rows = lines.slice(1).map(line => {
+    if (line.trim() === '') return {};
+    const rowValues = parseCSVRow(line);
+    
+    // Create an object mapping headers to values
+    return headers.reduce((obj, header, i) => {
+      obj[header] = rowValues[i] || '';
+      return obj;
+    }, {} as Record<string, string>);
+  }).filter(row => Object.keys(row).length > 0);
+  
+  return { headers, rows };
+}
+
+// Helper function to parse a CSV row, handling quoted fields
+function parseCSVRow(row: string) {
+  const fields = [];
+  let inQuotes = false;
+  let currentField = '';
+  
+  for (let i = 0; i < row.length; i++) {
+    const char = row[i];
+    
+    if (char === '"' && (i === 0 || row[i-1] !== '\\')) {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    
+    if (char === ',' && !inQuotes) {
+      fields.push(currentField.trim());
+      currentField = '';
+      continue;
+    }
+    
+    currentField += char;
+  }
+  
+  // Add the last field
+  fields.push(currentField.trim());
+  
+  return fields.map(field => {
+    // Remove surrounding quotes
+    if (field.startsWith('"') && field.endsWith('"')) {
+      return field.substring(1, field.length - 1);
+    }
+    return field;
+  });
+}
