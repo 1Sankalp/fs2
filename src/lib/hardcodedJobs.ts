@@ -38,6 +38,12 @@ interface DbJobWithResults {
   }>;
 }
 
+// Create a result type that matches the Prisma schema
+type ResultType = {
+  website: string;
+  email: string | null;
+};
+
 // In-memory job storage
 const jobsMap = new Map<string, HardcodedJob>();
 
@@ -129,7 +135,7 @@ const syncWithDatabase = async () => {
           // Add new job from database
           const newJob: HardcodedJob = {
             id: job.id,
-            name: job.name || 'Untitled Job',
+            name: job.name || 'Unnamed Job',
             status: job.status,
             sheetUrl: job.sheetUrl,
             columnName: job.columnName,
@@ -297,19 +303,22 @@ export async function loadJobsFromDatabase() {
     for (const job of dbJobs) {
       console.log(`Loading job ${job.id} for user ${job.userId} with ${job.results.length} results`);
       
+      // Create properly typed results with type assertion
+      const typedResults = job.results.map(r => ({
+        website: r.website,
+        email: r.email as string | null // Use type assertion here
+      }));
+      
       hardcodedJobs.set(job.id, {
         id: job.id,
-        name: job.name,
+        name: job.name || 'Unnamed Job',
         status: job.status,
         sheetUrl: job.sheetUrl,
         columnName: job.columnName,
         totalWebsites: job.totalUrls,
         processedWebsites: job.results.length,
         progress: job.progress || 0,
-        results: job.results.map(r => ({
-          website: r.website,
-          email: r.email || null
-        })),
+        results: typedResults,
         createdAt: job.createdAt.toISOString(),
         updatedAt: job.updatedAt.toISOString(),
         userId: job.userId

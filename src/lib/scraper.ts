@@ -98,7 +98,8 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
                 email: email || null
               });
               memoryJob.processedWebsites = (memoryJob.processedWebsites || 0) + 1;
-              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / memoryJob.totalWebsites) * 100));
+              const totalWebsites = memoryJob.totalWebsites || 1; // Add fallback
+              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / totalWebsites) * 100));
               memoryJob.updatedAt = new Date().toISOString();
               hardcodedJobs.set(jobId, memoryJob);
             }
@@ -131,7 +132,8 @@ export async function startEmailScraping(jobId: string, urls: string[]) {
                 email: null
               });
               memoryJob.processedWebsites = (memoryJob.processedWebsites || 0) + 1;
-              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / memoryJob.totalWebsites) * 100));
+              const totalWebsites = memoryJob.totalWebsites || 1; // Add fallback
+              memoryJob.progress = Math.min(100, Math.floor((memoryJob.processedWebsites / totalWebsites) * 100));
               memoryJob.updatedAt = new Date().toISOString();
               hardcodedJobs.set(jobId, memoryJob);
             }
