@@ -25,9 +25,9 @@ export async function GET(request: NextRequest) {
     console.log(`GET /api/jobs - User ID from session: ${userId}`);
     
     // Print info about in-memory jobs for debugging
-    console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size}`);
-    hardcodedJobs.forEach((job, id) => {
-      console.log(`Memory job: ${id} - User: ${job.userId} - Status: ${job.status}`);
+    console.log(`In-memory jobs map status - Size: ${hardcodedJobs.size()}`);
+    hardcodedJobs.values().forEach((job) => {
+      console.log(`Memory job: ${job.id} - User: ${job.userId} - Status: ${job.status}`);
     });
     
     // For hardcoded users, try to access the database but also include in-memory jobs
@@ -36,9 +36,11 @@ export async function GET(request: NextRequest) {
       
       // Get all jobs for this user from the in-memory store
       const memoryJobs: any[] = [];
-      hardcodedJobs.forEach((job, key) => {
+      
+      // Use values() and filter instead of forEach
+      hardcodedJobs.values().forEach((job) => {
         if (job.userId === userId) {
-          console.log(`Found in-memory job ${key} for user ${userId}`);
+          console.log(`Found in-memory job ${job.id} for user ${userId}`);
           memoryJobs.push({
             id: job.id,
             name: job.name,
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
             userId: userId
           });
         } else {
-          console.log(`Skipping job ${key} as it belongs to user ${job.userId}, not ${userId}`);
+          console.log(`Skipping job ${job.id} as it belongs to user ${job.userId}, not ${userId}`);
         }
       });
       

@@ -16,6 +16,7 @@ interface HardcodedJob {
   updatedAt: string;
   totalWebsites?: number;
   processedWebsites?: number;
+  progress?: number;
   userId: string;
   results: { website: string; email: string | null }[];
 }
