@@ -83,21 +83,31 @@ export default function JobList() {
       
       // Get response text first, then try to parse as JSON
       const responseText = await response.text();
+      console.log(`Delete job response for job ${jobId}:`, responseText);
       
-      let errorMessage = 'Failed to delete job';
       let jsonData;
+      let errorMessage = 'Failed to delete job';
       
       try {
-        // Try to parse the response as JSON
-        jsonData = JSON.parse(responseText);
+        // Only try to parse if there's content
+        if (responseText.trim()) {
+          // Try to parse the response as JSON
+          jsonData = JSON.parse(responseText);
+          console.log('Parsed JSON response:', jsonData);
+        } else {
+          console.warn('Empty response received from delete endpoint');
+        }
       } catch (parseError) {
-        console.error('Failed to parse response as JSON:', responseText);
-        errorMessage = `Invalid server response: ${responseText.substring(0, 100)}`;
+        console.error('Failed to parse response as JSON:', parseError);
+        console.error('Raw response text:', responseText);
+        errorMessage = `Error parsing server response: ${responseText.substring(0, 100)}`;
       }
       
       if (!response.ok) {
         throw new Error(jsonData?.message || jsonData?.error || errorMessage);
       }
+      
+      console.log('Job deleted successfully:', jobId);
       
       // Remove the job from the list
       setJobs(jobs.filter(job => job.id !== jobId));
