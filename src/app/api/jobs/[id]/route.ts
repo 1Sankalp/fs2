@@ -4,16 +4,15 @@ import { authOptions } from '@/lib/auth';
 import { prismaClientSingleton } from '@/lib/prisma';
 import { hardcodedJobs } from '@/lib/hardcodedJobs';
 
-// Next.js expects this specific params structure for dynamic routes
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    const id = params.id;
+    const id = context.params.id;
     console.log(`Getting job details for job ID: ${id}`);
 
     // Check authentication
@@ -102,13 +101,13 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ) {
   // Create a fresh Prisma client to avoid prepared statement issues
   const freshPrisma = prismaClientSingleton();
   
   try {
-    const id = params.id;
+    const id = context.params.id;
     console.log(`Deleting job ID: ${id}`);
 
     // Check authentication
